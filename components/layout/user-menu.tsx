@@ -50,8 +50,8 @@ export function UserMenu() {
           </div>
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>Workspace</DropdownMenuLabel>
         <DropdownMenuGroup>
+          <DropdownMenuLabel>Workspace</DropdownMenuLabel>
           <DropdownMenuItem render={<Link href="/settings" />}>
             <Settings className="text-muted-foreground" />
             Ajustes

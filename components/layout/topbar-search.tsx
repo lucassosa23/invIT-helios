@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { flatNav } from "@/lib/navigation";
+import { SETTINGS_SECTIONS } from "@/features/settings/lib/sections";
 import { loadInventory, subscribeInventory } from "@/lib/storage";
 import type { Asset } from "@/lib/fake-data";
 import {
@@ -259,6 +260,27 @@ export function TopbarSearch() {
                       {item.shortcut && (
                         <CommandShortcut>{item.shortcut}</CommandShortcut>
                       )}
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+
+              <CommandSeparator />
+
+              <CommandGroup heading="Ajustes">
+                {SETTINGS_SECTIONS.map((s) => {
+                  const Icon = s.icon;
+                  return (
+                    <CommandItem
+                      key={s.href}
+                      value={`ajustes settings ${s.label} ${(s.keywords ?? []).join(" ")}`}
+                      onSelect={() => run(() => router.push(s.href))}
+                    >
+                      <Icon className="text-muted-foreground" />
+                      <span>{s.label}</span>
+                      <span className="ml-2 truncate text-[11.5px] text-muted-foreground">
+                        Ajustes · {s.description}
+                      </span>
                     </CommandItem>
                   );
                 })}

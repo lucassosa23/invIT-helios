@@ -11,10 +11,16 @@ import {
   loadRequests,
   subscribeRequests,
 } from "@/features/requests/lib/requests";
+import {
+  loadPreferences,
+  subscribePreferences,
+} from "@/features/settings/lib/preferences";
 
 export function Sidebar() {
   const pathname = usePathname();
   const [pendingCount, setPendingCount] = useState(0);
+  const [showBadges, setShowBadges] = useState(true);
+  const [homeHref, setHomeHref] = useState("/dashboard");
 
   // Badge dinámico de Pedidos = todos los pedidos activos (pendientes +
   // esperando compra + listos para entregar). Entregados y rechazados
@@ -34,7 +40,18 @@ export function Sidebar() {
     return subscribeRequests(compute);
   }, []);
 
+  useEffect(() => {
+    const compute = () => {
+      const prefs = loadPreferences();
+      setShowBadges(prefs.showSidebarBadges);
+      setHomeHref(prefs.defaultPage);
+    };
+    compute();
+    return subscribePreferences(compute);
+  }, []);
+
   const dynamicBadge = (href: string): string | number | undefined => {
+    if (!showBadges) return undefined;
     if (href === "/requests" && pendingCount > 0) return pendingCount;
     return undefined;
   };
@@ -45,13 +62,13 @@ export function Sidebar() {
       className="sticky top-0 hidden h-svh flex-col self-start border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex"
     >
       <div className="flex h-16 items-center px-4">
-        <button
-          type="button"
+        <Link
+          href={homeHref}
           className="group flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-sidebar-accent"
         >
           <BrandMark />
           <ChevronsUpDown className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-        </button>
+        </Link>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4">
@@ -97,6 +114,7 @@ export function Sidebar() {
                       />
                       <span className="flex-1 truncate">{item.label}</span>
                       {(() => {
+                        if (!showBadges) return null;
                         const badge =
                           dynamicBadge(item.href) ?? item.badge;
                         if (badge === undefined) return null;

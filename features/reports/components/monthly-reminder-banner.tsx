@@ -5,11 +5,14 @@ import Link from "next/link";
 import { CalendarClock, Mail, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-import { Button } from "@/components/ui/button";
 import {
   shouldRemindForMonthlyReport,
   subscribeConfig,
 } from "../lib/report-config";
+import {
+  loadPreferences,
+  subscribePreferences,
+} from "@/features/settings/lib/preferences";
 
 const KEY_DISMISSED_REMINDER = "invit:email-reminder-dismissed:v1";
 
@@ -33,12 +36,20 @@ export function MonthlyReminderBanner() {
 
   useEffect(() => {
     const compute = () => {
+      const prefs = loadPreferences();
       const should =
-        shouldRemindForMonthlyReport() && !isDismissedForThisSession();
+        prefs.showActivityBanner &&
+        shouldRemindForMonthlyReport() &&
+        !isDismissedForThisSession();
       setShow(should);
     };
     compute();
-    return subscribeConfig(compute);
+    const u1 = subscribeConfig(compute);
+    const u2 = subscribePreferences(compute);
+    return () => {
+      u1();
+      u2();
+    };
   }, []);
 
   return (
