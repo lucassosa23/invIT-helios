@@ -6,14 +6,12 @@ import {
   Download,
   FileSpreadsheet,
   FileUp,
-  Mail,
   PackageOpen,
   PackageX,
   Plus,
   Search,
   Sparkles,
 } from "lucide-react";
-import Link from "next/link";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -65,6 +63,17 @@ export function InventoryList({ initialAssets, locations }: Props) {
   const [category, setCategory] = useState<string>("all");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Lee ?q= y ?filter= del URL al montar (sin useSearchParams para evitar
+  // problemas de Suspense boundary en Next 16).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    const f = params.get("filter");
+    if (q) setQuery(q);
+    if (f === "critical" || f === "low") setStatus(f as Status);
+  }, []);
 
   const [importRows, setImportRows] = useState<ParsedRow[]>([]);
   const [importFileName, setImportFileName] = useState("");
@@ -312,15 +321,6 @@ export function InventoryList({ initialAssets, locations }: Props) {
             </select>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 lg:ml-auto">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleTemplate}
-              className="text-muted-foreground"
-            >
-              <FileSpreadsheet className="size-3.5" />
-              Plantilla
-            </Button>
             <Button variant="outline" size="sm" onClick={triggerFilePicker}>
               <FileUp className="size-3.5" />
               Importar
@@ -488,13 +488,6 @@ export function InventoryList({ initialAssets, locations }: Props) {
               de {assets.length} items
             </span>
             <div className="flex items-center gap-3">
-              <Link
-                href="/inventory/email-preview"
-                className="inline-flex items-center gap-1 text-primary transition-colors hover:text-primary/80"
-              >
-                <Mail className="size-3.5" />
-                Vista previa email
-              </Link>
               {assets.length > 0 && (
                 <button
                   type="button"
@@ -516,6 +509,7 @@ export function InventoryList({ initialAssets, locations }: Props) {
         fileName={importFileName}
         onReplace={handleReplace}
         onAppend={handleAppend}
+        onDownloadTemplate={handleTemplate}
       />
 
       <ItemFormDialog

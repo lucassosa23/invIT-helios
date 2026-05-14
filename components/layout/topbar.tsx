@@ -1,7 +1,7 @@
 import { Bell, Menu } from "lucide-react";
 
 import { Breadcrumbs } from "./breadcrumbs";
-import { SearchTrigger } from "./search-trigger";
+import { TopbarSearch } from "./topbar-search";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ export function Topbar() {
       </div>
 
       <div className="flex flex-1 justify-center px-2">
-        <SearchTrigger />
+        <TopbarSearch />
       </div>
 
       <div className="flex items-center gap-1">

@@ -25,7 +25,6 @@ type KpiKey =
 type KpiConfig = {
   key: KpiKey;
   label: string;
-  hint: string;
   icon: LucideIcon;
   tone: KpiTone;
   href: string;
@@ -63,7 +62,6 @@ const KPIS: KpiConfig[] = [
   {
     key: "stockCritical",
     label: "Stock crítico",
-    hint: "items que necesitan reposición",
     icon: AlertTriangle,
     tone: "critical",
     href: "/inventory?filter=critical",
@@ -71,7 +69,6 @@ const KPIS: KpiConfig[] = [
   {
     key: "pendingProcurement",
     label: "Compras pendientes",
-    hint: "para revisar o enviar",
     icon: ShoppingBag,
     tone: "info",
     href: "/procurement",
@@ -79,7 +76,6 @@ const KPIS: KpiConfig[] = [
   {
     key: "activeRequests",
     label: "Pedidos abiertos",
-    hint: "esperando respuesta",
     icon: Inbox,
     tone: "low",
     href: "/requests",
@@ -87,7 +83,6 @@ const KPIS: KpiConfig[] = [
   {
     key: "warrantyExpiring",
     label: "Garantías por vencer",
-    hint: "en los próximos 90 días",
     icon: ShieldCheck,
     tone: "healthy",
     href: "/inventory?filter=warranty",
@@ -156,15 +151,12 @@ export function KpiCards({ seed }: { seed: KpiValues }) {
                   <Icon className={cn("size-5", tone.iconColor)} strokeWidth={2} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                  <div className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                     {c.label}
                   </div>
-                  <div className="mt-1 text-[30px] font-semibold leading-tight tracking-tight tabular-nums">
+                  <div className="mt-2 text-[32px] font-semibold leading-none tracking-tight tabular-nums">
                     {formatNumber(value)}
                   </div>
-                  <p className="mt-0.5 text-[12px] text-muted-foreground">
-                    {c.hint}
-                  </p>
                 </div>
               </div>
             </Card>

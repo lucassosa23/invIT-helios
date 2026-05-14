@@ -2,10 +2,17 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+type Attachment = {
+  filename: string;
+  /** Contenido binario codificado en base64 */
+  content: string;
+};
+
 type Payload = {
   to?: string | string[];
   html?: string;
   subject?: string;
+  attachments?: Attachment[];
 };
 
 export async function POST(request: Request) {
@@ -36,6 +43,14 @@ export async function POST(request: Request) {
   const to = body.to;
   const html = body.html;
   const subject = body.subject ?? "invIT — Resumen de stock bajo";
+  const attachments = Array.isArray(body.attachments)
+    ? body.attachments.filter(
+        (a): a is Attachment =>
+          !!a &&
+          typeof a.filename === "string" &&
+          typeof a.content === "string",
+      )
+    : undefined;
 
   if (!to || (Array.isArray(to) && to.length === 0)) {
     return NextResponse.json(
@@ -65,6 +80,9 @@ export async function POST(request: Request) {
         to: Array.isArray(to) ? to : [to],
         subject,
         html,
+        ...(attachments && attachments.length > 0
+          ? { attachments }
+          : {}),
       }),
     });
 

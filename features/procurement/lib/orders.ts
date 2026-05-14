@@ -3,10 +3,20 @@
 import { statusFromStock, type Asset } from "@/lib/fake-data";
 import { loadInventory, saveInventory } from "@/lib/storage";
 
+/**
+ * Reconoce si una orden es el plan de compras del mes (referencia tipo
+ * PO-PLAN-YYYY-MM). Helper duplicado acá para evitar dependencias
+ * circulares con monthly-plan.ts.
+ */
+export function isMonthlyPlan(order: { reference: string }): boolean {
+  return /^PO-PLAN-\d{4}-\d{2}$/.test(order.reference);
+}
+
 export type PurchaseOrderStatus =
   | "draft"
   | "ready"
   | "ordered"
+  | "received_partial"
   | "received"
   | "cancelled";
 
@@ -18,6 +28,7 @@ export type OrderLine = {
   category: string;
   isNew: boolean;
   qty: number;
+  receivedQty?: number; // suma acumulada de lo recibido en entregas parciales
 };
 
 export type PurchaseOrder = {
@@ -119,24 +130,108 @@ export type ApplyResult = {
   created: number;
 };
 
-/**
- * Aplica una orden recibida al inventario: suma cantidades a items existentes
- * y crea nuevos assets para los marcados como `isNew`. Devuelve cuántos
- * fueron actualizados vs. creados.
- */
-export function applyOrderToInventory(order: PurchaseOrder): ApplyResult {
-  const inventory = loadInventory() ?? [];
-  let updated = 0;
-  let created = 0;
+/** Cantidades que faltan por recibir por línea. */
+export function pendingPerLine(order: PurchaseOrder): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const l of order.lines) {
+    const received = l.receivedQty ?? 0;
+    m.set(l.id, Math.max(0, l.qty - received));
+  }
+  return m;
+}
 
-  const byId = new Map(inventory.map((a) => [a.id, a]));
+export function totalReceived(order: PurchaseOrder): number {
+  return order.lines.reduce((s, l) => s + (l.receivedQty ?? 0), 0);
+}
+
+export function totalPending(order: PurchaseOrder): number {
+  return order.lines.reduce(
+    (s, l) => s + Math.max(0, l.qty - (l.receivedQty ?? 0)),
+    0,
+  );
+}
+
+/** Determina el status según el avance de las líneas. */
+export function deriveStatusAfterReceive(
+  order: PurchaseOrder,
+): PurchaseOrderStatus {
+  const allComplete = order.lines.every(
+    (l) => (l.receivedQty ?? 0) >= l.qty,
+  );
+  const anyReceived = order.lines.some((l) => (l.receivedQty ?? 0) > 0);
+  if (allComplete) return "received";
+  if (anyReceived) return "received_partial";
+  return order.status;
+}
+
+export type Shipment = {
+  lineId: string;
+  qty: number; // cantidad recibida en esta entrega (>= 0)
+};
+
+export type ShipmentResult = {
+  updated: number; // assets existentes actualizados
+  created: number; // assets nuevos creados desde líneas isNew
+  newStatus: PurchaseOrderStatus;
+  updatedOrder: PurchaseOrder;
+  totalAdded: number; // suma de unidades agregadas al inventario
+};
+
+/**
+ * Aplica una entrega parcial (o completa) al inventario y actualiza la orden.
+ * `shipments` es un array con cuánto se recibe AHORA por línea (no acumulado).
+ * Para una recepción completa de una sola vez: shipments = todas las pendientes.
+ *
+ * Maneja:
+ *   - Líneas existentes (con assetId): suma stock al asset.
+ *   - Líneas nuevas (isNew): crea el asset en la primera entrega, después solo
+ *     suma. El assetId creado se persiste en la línea para entregas futuras.
+ *   - Cierre automático del status: si todo se recibió → "received", sino
+ *     queda en "received_partial".
+ */
+export function receiveOrderShipment(
+  orderId: string,
+  shipments: Shipment[],
+): ShipmentResult | { ok: false; reason: string } {
+  const orders = loadOrders();
+  const idx = orders.findIndex((o) => o.id === orderId);
+  if (idx < 0) return { ok: false, reason: "Orden no encontrada." };
+  const order = orders[idx];
+
+  if (order.status !== "ordered" && order.status !== "received_partial") {
+    return {
+      ok: false,
+      reason: "Solo se pueden recibir órdenes en estado Enviada o parcial.",
+    };
+  }
+
+  const inventory = loadInventory() ?? [];
+  const byAssetId = new Map(inventory.map((a) => [a.id, a]));
   const now = new Date();
 
-  for (const line of order.lines) {
-    if (line.assetId && byId.has(line.assetId)) {
-      const a = byId.get(line.assetId)!;
-      const newStock = a.stock + line.qty;
-      byId.set(a.id, {
+  let updated = 0;
+  let created = 0;
+  let totalAdded = 0;
+
+  // Mapeo de lineId → shipment
+  const shipmentByLine = new Map<string, number>();
+  for (const s of shipments) {
+    if (s.qty > 0) shipmentByLine.set(s.lineId, s.qty);
+  }
+  if (shipmentByLine.size === 0) {
+    return { ok: false, reason: "No marcaste cantidad recibida en ninguna línea." };
+  }
+
+  const nextLines: OrderLine[] = order.lines.map((line) => {
+    const incoming = shipmentByLine.get(line.id) ?? 0;
+    if (incoming <= 0) return line;
+
+    let resolvedAssetId = line.assetId;
+
+    if (resolvedAssetId && byAssetId.has(resolvedAssetId)) {
+      const a = byAssetId.get(resolvedAssetId)!;
+      const newStock = a.stock + incoming;
+      byAssetId.set(a.id, {
         ...a,
         stock: newStock,
         status: statusFromStock(newStock, a.threshold),
@@ -144,7 +239,8 @@ export function applyOrderToInventory(order: PurchaseOrder): ApplyResult {
       });
       updated++;
     } else {
-      const id = `ast_po_${now.getTime().toString(36)}_${created}`;
+      // Primera entrega de una línea isNew: crear asset
+      const id = `ast_po_${now.getTime().toString(36)}_${created}_${Math.random().toString(36).slice(2, 5)}`;
       const sku = `${(line.category.slice(0, 3) || "GEN").toUpperCase()}-${(
         line.brand.slice(0, 3) || "BRD"
       ).toUpperCase()}-${id.slice(-4).toUpperCase()}`;
@@ -155,28 +251,65 @@ export function applyOrderToInventory(order: PurchaseOrder): ApplyResult {
         name: line.name,
         brand: line.brand,
         category: line.category || "Otros",
-        stock: line.qty,
+        stock: incoming,
         threshold,
         unitCost: 0,
         locationId: inventory[0]?.locationId ?? "",
         vendorId: "",
         warrantyExpiresAt: new Date(0),
-        status: statusFromStock(line.qty, threshold),
+        status: statusFromStock(incoming, threshold),
         updatedAt: now,
       };
-      byId.set(id, asset);
+      byAssetId.set(id, asset);
+      resolvedAssetId = id;
       created++;
     }
-  }
 
-  saveInventory(Array.from(byId.values()));
-  return { updated, created };
+    totalAdded += incoming;
+    return {
+      ...line,
+      assetId: resolvedAssetId,
+      receivedQty: (line.receivedQty ?? 0) + incoming,
+    };
+  });
+
+  saveInventory(Array.from(byAssetId.values()));
+
+  const orderInProgress: PurchaseOrder = {
+    ...order,
+    lines: nextLines,
+    updatedAt: now,
+  };
+  const newStatus = deriveStatusAfterReceive(orderInProgress);
+  const updatedOrder: PurchaseOrder = {
+    ...orderInProgress,
+    status: newStatus,
+    receivedAt: newStatus === "received" ? now : order.receivedAt,
+  };
+
+  const nextOrders = orders.slice();
+  nextOrders[idx] = updatedOrder;
+  saveOrders(nextOrders);
+
+  return { updated, created, newStatus, updatedOrder, totalAdded };
+}
+
+/** Compat: recibe la orden completa de una sola vez (legacy). */
+export function applyOrderToInventory(order: PurchaseOrder): ApplyResult {
+  const shipments: Shipment[] = order.lines.map((l) => ({
+    lineId: l.id,
+    qty: Math.max(0, l.qty - (l.receivedQty ?? 0)),
+  }));
+  const res = receiveOrderShipment(order.id, shipments);
+  if ("ok" in res) return { updated: 0, created: 0 };
+  return { updated: res.updated, created: res.created };
 }
 
 const STATUS_FLOW: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
-  draft: ["ready", "cancelled"],
+  draft: ["ready", "ordered", "cancelled"],
   ready: ["ordered", "draft", "cancelled"],
-  ordered: ["received", "cancelled"],
+  ordered: ["received_partial", "received", "cancelled"],
+  received_partial: ["received_partial", "received"],
   received: [],
   cancelled: [],
 };
@@ -192,6 +325,7 @@ export const STATUS_LABEL: Record<PurchaseOrderStatus, string> = {
   draft: "Borrador",
   ready: "Lista para enviar",
   ordered: "Enviada",
+  received_partial: "Recibida parcial",
   received: "Recibida",
   cancelled: "Cancelada",
 };
@@ -217,6 +351,12 @@ export const STATUS_TONE: Record<
     bg: "bg-primary/15",
     text: "text-primary",
     ring: "ring-primary/30",
+  },
+  received_partial: {
+    dot: "bg-status-low",
+    bg: "bg-status-low-soft",
+    text: "text-status-low",
+    ring: "ring-status-low/30",
   },
   received: {
     dot: "bg-status-healthy",

@@ -11,9 +11,9 @@ export default function ProcurementPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Plan de compras del mes"
+        eyebrow="Planificación mensual"
         title="Compras"
-        description="Creá órdenes con los items que necesitan reposición. Cuando una orden se marca como recibida, el stock se actualiza solo."
+        description="Organizá lo que vas a comprar el próximo mes. Una vez que marcás una orden como enviada, pasa a Pedidos → Nuestras compras para esperar la entrega."
       />
       <ProcurementShell />
     </div>

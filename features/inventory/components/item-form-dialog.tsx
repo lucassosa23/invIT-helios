@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowRight, X } from "lucide-react";
+import { ArrowRight, Sparkles, X } from "lucide-react";
 
 import {
   Dialog,
@@ -12,8 +12,15 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import type { Asset, Location } from "@/lib/fake-data";
+import {
+  isDismissed,
+  markDismissed,
+  markUndismissed,
+} from "@/features/procurement/lib/monthly-plan";
 
 export type ItemFormValues = {
   name: string;
@@ -49,6 +56,7 @@ export function ItemFormDialog({
   onSubmit,
 }: Props) {
   const [values, setValues] = useState<ItemFormValues>(empty);
+  const [includeInAutoPlan, setIncludeInAutoPlan] = useState(true);
 
   useEffect(() => {
     if (open) {
@@ -61,11 +69,13 @@ export function ItemFormDialog({
           threshold: editing.threshold,
           locationId: editing.locationId,
         });
+        setIncludeInAutoPlan(!isDismissed(editing.id));
       } else {
         setValues({
           ...empty,
           locationId: locations[0]?.id ?? "",
         });
+        setIncludeInAutoPlan(true);
       }
     }
   }, [open, editing, locations]);
@@ -78,6 +88,11 @@ export function ItemFormDialog({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!values.name.trim()) return;
+    // Sincronizar el flag dismissed cuando se edita un item existente
+    if (editing) {
+      if (includeInAutoPlan) markUndismissed(editing.id);
+      else markDismissed(editing.id);
+    }
     onSubmit({
       ...values,
       name: values.name.trim(),
@@ -171,15 +186,12 @@ export function ItemFormDialog({
               <Label htmlFor="stock" className="text-[12px] font-medium">
                 Cantidad actual <span className="text-status-critical">*</span>
               </Label>
-              <Input
+              <NumberInput
                 id="stock"
-                type="number"
                 min={0}
-                required
+                fallback={0}
                 value={values.stock}
-                onChange={(e) =>
-                  update("stock", Number(e.target.value) || 0)
-                }
+                onChange={(n) => update("stock", n)}
                 className="h-9 font-mono tabular-nums"
               />
             </div>
@@ -187,15 +199,12 @@ export function ItemFormDialog({
               <Label htmlFor="threshold" className="text-[12px] font-medium">
                 Cantidad mínima <span className="text-status-critical">*</span>
               </Label>
-              <Input
+              <NumberInput
                 id="threshold"
-                type="number"
                 min={1}
-                required
+                fallback={1}
                 value={values.threshold}
-                onChange={(e) =>
-                  update("threshold", Number(e.target.value) || 1)
-                }
+                onChange={(n) => update("threshold", n)}
                 className="h-9 font-mono tabular-nums"
               />
             </div>
@@ -218,6 +227,44 @@ export function ItemFormDialog({
               ))}
             </select>
           </div>
+
+          {editing && (
+            <label
+              htmlFor="auto-plan-toggle"
+              className={cn(
+                "flex cursor-pointer items-start gap-3 rounded-lg p-3 ring-1 transition-colors",
+                includeInAutoPlan
+                  ? "bg-primary/5 ring-primary/30"
+                  : "bg-muted/40 ring-foreground/10 hover:bg-muted/60",
+              )}
+            >
+              <input
+                id="auto-plan-toggle"
+                type="checkbox"
+                checked={includeInAutoPlan}
+                onChange={(e) => setIncludeInAutoPlan(e.target.checked)}
+                className="mt-0.5 size-4 accent-primary"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-[13px] font-medium">
+                  <Sparkles
+                    className={cn(
+                      "size-3.5",
+                      includeInAutoPlan
+                        ? "text-primary"
+                        : "text-muted-foreground",
+                    )}
+                  />
+                  Incluir en el plan de compras automático
+                </div>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+                  {includeInAutoPlan
+                    ? "Cuando este item baje del mínimo, se va a agregar solo al plan del mes."
+                    : "Item excluido del auto-plan. Aparece en Sugerencias para agregarlo manualmente si querés."}
+                </p>
+              </div>
+            </label>
+          )}
 
           <p className="mt-1 rounded-md bg-muted/60 px-3 py-2 text-[11.5px] text-muted-foreground">
             El estado (Disponible / Bajo / Crítico / Agotado) se calcula

@@ -21,6 +21,7 @@ type Props = {
   fileName: string;
   onReplace: () => void;
   onAppend: () => void;
+  onDownloadTemplate?: () => void;
 };
 
 export function ImportPreview({
@@ -30,6 +31,7 @@ export function ImportPreview({
   fileName,
   onReplace,
   onAppend,
+  onDownloadTemplate,
 }: Props) {
   const preview = rows.slice(0, 8);
   const empty = rows.length === 0;
@@ -153,31 +155,45 @@ export function ImportPreview({
           )}
         </div>
 
-        <div className="flex flex-row items-center justify-end gap-2 border-t border-border/70 px-5 py-3">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-          >
-            Cancelar
-          </Button>
-          {!empty && (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onAppend}
-              >
-                Agregar al inventario
-              </Button>
-              <Button type="button" size="sm" onClick={onReplace}>
-                Reemplazar todo
-                <ArrowRight className="size-3.5" />
-              </Button>
-            </>
+        <div className="flex flex-row items-center justify-between gap-2 border-t border-border/70 px-5 py-3">
+          {onDownloadTemplate ? (
+            <button
+              type="button"
+              onClick={onDownloadTemplate}
+              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground hover:text-primary"
+            >
+              <FileSpreadsheet className="size-3.5" />
+              Descargar plantilla en blanco
+            </button>
+          ) : (
+            <span />
           )}
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancelar
+            </Button>
+            {!empty && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onAppend}
+                >
+                  Agregar al inventario
+                </Button>
+                <Button type="button" size="sm" onClick={onReplace}>
+                  Reemplazar todo
+                  <ArrowRight className="size-3.5" />
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

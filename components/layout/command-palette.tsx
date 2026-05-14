@@ -9,6 +9,7 @@ import {
   CornerDownLeft,
   Inbox,
   LayoutDashboard,
+  Package,
   Plus,
   Settings,
   ShoppingBag,
@@ -27,11 +28,27 @@ import {
 } from "@/components/ui/command";
 import { useTheme } from "next-themes";
 import { flatNav } from "@/lib/navigation";
+import { loadInventory, subscribeInventory } from "@/lib/storage";
+import type { Asset } from "@/lib/fake-data";
+import {
+  loadOrders,
+  subscribeOrders,
+  type PurchaseOrder,
+} from "@/features/procurement/lib/orders";
+import {
+  loadRequests,
+  subscribeRequests,
+  type InternalRequest,
+} from "@/features/requests/lib/requests";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const { setTheme, resolvedTheme } = useTheme();
+
+  const [inventory, setInventory] = useState<Asset[]>([]);
+  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [requests, setRequests] = useState<InternalRequest[]>([]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -48,6 +65,24 @@ export function CommandPalette() {
       window.removeEventListener("invit:open-command-palette", handleOpen);
     };
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const refresh = () => {
+      setInventory(loadInventory() ?? []);
+      setOrders(loadOrders());
+      setRequests(loadRequests());
+    };
+    refresh();
+    const u1 = subscribeInventory(refresh);
+    const u2 = subscribeOrders(refresh);
+    const u3 = subscribeRequests(refresh);
+    return () => {
+      u1();
+      u2();
+      u3();
+    };
+  }, [open]);
 
   const run = (fn: () => void) => {
     setOpen(false);
@@ -70,6 +105,78 @@ export function CommandPalette() {
             </span>
           </div>
         </CommandEmpty>
+
+        {inventory.length > 0 && (
+          <CommandGroup heading="Inventario">
+            {inventory.slice(0, 50).map((a) => (
+              <CommandItem
+                key={`inv-${a.id}`}
+                value={`inv ${a.name} ${a.brand} ${a.sku} ${a.category}`}
+                onSelect={() =>
+                  run(() =>
+                    router.push(
+                      `/inventory?q=${encodeURIComponent(a.name)}`,
+                    ),
+                  )
+                }
+              >
+                <Package className="text-muted-foreground" />
+                <span className="flex-1 truncate">{a.name}</span>
+                <span className="ml-2 truncate text-xs text-muted-foreground">
+                  {a.brand || a.category} · stock {a.stock}
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {orders.length > 0 && (
+          <CommandGroup heading="Órdenes de compra">
+            {orders.slice(0, 30).map((o) => {
+              const itemPreview = o.lines
+                .slice(0, 3)
+                .map((l) => l.name)
+                .join(", ");
+              return (
+                <CommandItem
+                  key={`ord-${o.id}`}
+                  value={`po ${o.reference} ${itemPreview} ${o.status}`}
+                  onSelect={() => run(() => router.push("/procurement"))}
+                >
+                  <ShoppingBag className="text-muted-foreground" />
+                  <span className="font-mono">{o.reference}</span>
+                  <span className="ml-2 truncate text-xs text-muted-foreground">
+                    {o.lines.length}{" "}
+                    {o.lines.length === 1 ? "item" : "items"}
+                    {itemPreview && ` · ${itemPreview}`}
+                  </span>
+                </CommandItem>
+              );
+            })}
+          </CommandGroup>
+        )}
+
+        {requests.length > 0 && (
+          <CommandGroup heading="Pedidos internos">
+            {requests.slice(0, 30).map((r) => (
+              <CommandItem
+                key={`req-${r.id}`}
+                value={`req ${r.reference} ${r.requesterName} ${r.itemName} ${r.status}`}
+                onSelect={() => run(() => router.push("/requests"))}
+              >
+                <Inbox className="text-muted-foreground" />
+                <span className="font-mono">{r.reference}</span>
+                <span className="ml-2 truncate text-xs text-muted-foreground">
+                  {r.requesterName} · {r.qty} × {r.itemName}
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {(inventory.length > 0 ||
+          orders.length > 0 ||
+          requests.length > 0) && <CommandSeparator />}
 
         <CommandGroup heading="Navegación">
           {flatNav.map((item) => {

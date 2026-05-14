@@ -1,19 +1,48 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { primaryNav } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { ChevronsUpDown } from "lucide-react";
+import {
+  loadRequests,
+  subscribeRequests,
+} from "@/features/requests/lib/requests";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Badge dinámico de Pedidos = todos los pedidos activos (pendientes +
+  // esperando compra + listos para entregar). Entregados y rechazados
+  // no cuentan — esos viven en el historial.
+  useEffect(() => {
+    const compute = () => {
+      const all = loadRequests();
+      const active = all.filter(
+        (r) =>
+          r.status === "pending" ||
+          r.status === "awaiting_purchase" ||
+          r.status === "ready_to_deliver",
+      ).length;
+      setPendingCount(active);
+    };
+    compute();
+    return subscribeRequests(compute);
+  }, []);
+
+  const dynamicBadge = (href: string): string | number | undefined => {
+    if (href === "/requests" && pendingCount > 0) return pendingCount;
+    return undefined;
+  };
 
   return (
     <aside
       data-slot="sidebar"
-      className="hidden h-svh flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex"
+      className="sticky top-0 hidden h-svh flex-col self-start border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex"
     >
       <div className="flex h-16 items-center px-4">
         <button
@@ -67,11 +96,16 @@ export function Sidebar() {
                         strokeWidth={2}
                       />
                       <span className="flex-1 truncate">{item.label}</span>
-                      {item.badge !== undefined && (
-                        <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
-                          {item.badge}
-                        </span>
-                      )}
+                      {(() => {
+                        const badge =
+                          dynamicBadge(item.href) ?? item.badge;
+                        if (badge === undefined) return null;
+                        return (
+                          <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
+                            {badge}
+                          </span>
+                        );
+                      })()}
                     </Link>
                   </li>
                 );

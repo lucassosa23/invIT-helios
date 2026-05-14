@@ -15,7 +15,27 @@ const STATUS_LABEL: Record<string, string> = {
   out: "Agotado",
 };
 
+// Crítico primero (más visible al abrir el archivo), después bajo, healthy, out.
+const STATUS_ORDER: Record<string, number> = {
+  critical: 0,
+  low: 1,
+  healthy: 2,
+  out: 3,
+};
+
 const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const HEADERS = [
+  "Código",
+  "Nombre",
+  "Marca",
+  "Categoría",
+  "Cantidad actual",
+  "Cantidad mínima",
+  "Falta",
+  "Estado",
+  "Ubicación",
+] as const;
 
 export function exportInventoryToExcel(
   assets: Asset[],
@@ -23,42 +43,107 @@ export function exportInventoryToExcel(
 ) {
   const locationMap = Object.fromEntries(locations.map((l) => [l.id, l.name]));
 
-  const rows = assets.map((a) => ({
+  const sorted = [...assets].sort((a, b) => {
+    const so = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
+    if (so !== 0) return so;
+    const cat = a.category.localeCompare(b.category, "es");
+    if (cat !== 0) return cat;
+    return a.name.localeCompare(b.name, "es");
+  });
+
+  const rows = sorted.map((a) => ({
     Código: a.sku,
     Nombre: a.name,
     Marca: a.brand,
     Categoría: a.category,
     "Cantidad actual": a.stock,
     "Cantidad mínima": a.threshold,
+    Falta: Math.max(0, a.threshold - a.stock),
     Estado: STATUS_LABEL[a.status] ?? a.status,
     Ubicación: locationMap[a.locationId] ?? "",
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows, {
-    header: [
-      "Código",
-      "Nombre",
-      "Marca",
-      "Categoría",
-      "Cantidad actual",
-      "Cantidad mínima",
-      "Estado",
-      "Ubicación",
-    ],
+    header: [...HEADERS],
   });
+
+  // Anchos optimizados
   ws["!cols"] = [
-    { wch: 18 },
-    { wch: 34 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 12 },
-    { wch: 28 },
+    { wch: 18 }, // Código
+    { wch: 36 }, // Nombre
+    { wch: 16 }, // Marca
+    { wch: 18 }, // Categoría
+    { wch: 14 }, // Cantidad actual
+    { wch: 14 }, // Cantidad mínima
+    { wch: 10 }, // Falta
+    { wch: 14 }, // Estado
+    { wch: 28 }, // Ubicación
   ];
 
+  // Freeze fila de encabezado
+  ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+  // Auto-filtro en todas las columnas (rango = header + data)
+  const lastCol = String.fromCharCode("A".charCodeAt(0) + HEADERS.length - 1);
+  ws["!autofilter"] = { ref: `A1:${lastCol}${rows.length + 1}` };
+
+  // Estilos: el writer comunitario de SheetJS no escribe `.s` (estilos), pero
+  // sí respeta `.z` (number format) y `.t` (tipo). Le damos formato a los
+  // contadores para que se muestren como enteros con separador.
+  const numCols = ["E", "F", "G"]; // Cantidad actual, Cantidad mínima, Falta
+  for (let r = 2; r <= rows.length + 1; r++) {
+    for (const col of numCols) {
+      const cell = ws[`${col}${r}`];
+      if (cell) cell.z = "#,##0";
+    }
+  }
+
+  // Hoja Resumen
+  const total = sorted.length;
+  const byStatus: Record<string, number> = {
+    healthy: 0,
+    low: 0,
+    critical: 0,
+    out: 0,
+  };
+  const byCategory: Record<string, number> = {};
+  let totalUnits = 0;
+  let totalMissing = 0;
+  for (const a of sorted) {
+    byStatus[a.status] = (byStatus[a.status] ?? 0) + 1;
+    byCategory[a.category] = (byCategory[a.category] ?? 0) + 1;
+    totalUnits += a.stock;
+    totalMissing += Math.max(0, a.threshold - a.stock);
+  }
+
+  const summaryRows: (string | number)[][] = [
+    ["RESUMEN DE INVENTARIO"],
+    [`Generado: ${new Date().toLocaleString("es-AR")}`],
+    [],
+    ["Total de items", total],
+    ["Unidades totales en stock", totalUnits],
+    ["Unidades faltantes (bajo umbral)", totalMissing],
+    [],
+    ["Por estado", ""],
+    [`  ${STATUS_LABEL.critical}`, byStatus.critical ?? 0],
+    [`  ${STATUS_LABEL.low}`, byStatus.low ?? 0],
+    [`  ${STATUS_LABEL.healthy}`, byStatus.healthy ?? 0],
+    [`  ${STATUS_LABEL.out}`, byStatus.out ?? 0],
+    [],
+    ["Por categoría", ""],
+    ...Object.entries(byCategory)
+      .sort((a, b) => a[0].localeCompare(b[0], "es"))
+      .map(([cat, n]) => [`  ${cat}`, n] as [string, number]),
+  ];
+  const summaryWs = XLSX.utils.aoa_to_sheet(summaryRows);
+  summaryWs["!cols"] = [{ wch: 38 }, { wch: 14 }];
+
   const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, summaryWs, "Resumen");
   XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+
+  // Pestaña activa por defecto: Inventario
+  wb.Workbook = { ...(wb.Workbook ?? {}), Views: [{ RTL: false }] };
+
   XLSX.writeFile(wb, `inventario_${todayStr()}.xlsx`);
 }
 

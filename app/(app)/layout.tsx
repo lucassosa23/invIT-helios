@@ -1,6 +1,7 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
-import { CommandPalette } from "@/components/layout/command-palette";
+import { MonthlyPlanReconciler } from "@/features/procurement/components/monthly-plan-reconciler";
+import { MonthlyReminderBanner } from "@/features/reports/components/monthly-reminder-banner";
 
 export default function AppShellLayout({
   children,
@@ -13,6 +14,7 @@ export default function AppShellLayout({
         <Sidebar />
         <div className="flex min-w-0 flex-col">
           <Topbar />
+          <MonthlyReminderBanner />
           <main className="flex-1">
             <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
               {children}
@@ -20,7 +22,7 @@ export default function AppShellLayout({
           </main>
         </div>
       </div>
-      <CommandPalette />
+      <MonthlyPlanReconciler />
     </div>
   );
 }
