@@ -1,0 +1,355 @@
+// invIT — schema base
+// Diseñado para reemplazar progresivamente el localStorage actual.
+// Convenciones:
+//  - IDs: cuid() (cortos, ordenables, sin colisión)
+//  - Snake_case en tablas/columnas; PascalCase en models
+//  - Soft delete: no usado por ahora (eliminaciones reales)
+//  - Auditoría: la tabla `Movement` es el log inmutable de stock
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// Identidad
+// ============================================================
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      UserRole @default(ADMIN)
+  // Link al auth.users.id de Supabase. Nullable hasta que el user complete
+  // el primer login; ahí se setea automáticamente.
+  authId    String?  @unique @map("auth_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  movements    Movement[]
+  scanSessions ScanSession[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+// ============================================================
+// Catálogo: ubicaciones y proveedores
+// ============================================================
+
+model Location {
+  id        String   @id @default(cuid())
+  name      String
+  zone      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  assets Asset[]
+
+  @@map("locations")
+}
+
+model Vendor {
+  id        String   @id @default(cuid())
+  name      String
+  category  String
+  rating    Float?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  assets Asset[]
+
+  @@map("vendors")
+}
+
+// ============================================================
+// Inventario
+// ============================================================
+
+enum AssetStatus {
+  HEALTHY
+  LOW
+  CRITICAL
+  OUT
+}
+
+model Asset {
+  id                String      @id @default(cuid())
+  sku               String      @unique
+  // El barcode es opcional al crear; se puede vincular después desde la
+  // sesión de escaneo cuando aparece un código no resuelto.
+  barcode           String?     @unique
+  name              String
+  brand             String
+  category          String
+  stock             Int         @default(0)
+  threshold         Int         @default(5)
+  unitCost          Float       @default(0) @map("unit_cost")
+  locationId        String?     @map("location_id")
+  vendorId          String?     @map("vendor_id")
+  warrantyExpiresAt DateTime?   @map("warranty_expires_at")
+  status            AssetStatus @default(HEALTHY)
+  // Items excluidos del plan de compras automático (lo que hoy vive
+  // en monthly-plan dismissed).
+  dismissedFromAutoPlan Boolean @default(false) @map("dismissed_from_auto_plan")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  location  Location?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  vendor    Vendor?    @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  movements Movement[]
+  scanLines ScanLine[]
+  orderLines OrderLine[]
+  requests  InternalRequest[]
+  resolvedFromScans UnknownScan[]
+
+  @@index([status])
+  @@index([category])
+  @@index([barcode])
+  @@map("assets")
+}
+
+// ============================================================
+// Movimientos: log inmutable de cambios de stock
+// ============================================================
+
+enum MovementType {
+  IN          // ingreso (compra, devolución, ajuste positivo)
+  OUT         // egreso (entrega, baja, ajuste negativo)
+  ADJUST      // corrección manual (puede ser signada)
+  RECEIVE     // recepción de orden de compra
+  CORRECTION  // corrección post-auditoría
+}
+
+enum MovementSourceKind {
+  SCAN_SESSION
+  ORDER_RECEIVE
+  REQUEST_DELIVER
+  MANUAL_EDIT
+  IMPORT
+  AUDIT
+}
+
+model Movement {
+  id          String             @id @default(cuid())
+  assetId     String             @map("asset_id")
+  type        MovementType
+  qty         Int                // unidades en la transacción (siempre > 0)
+  delta       Int                // signado: +N para in/receive, -N para out, +/-N para adjust
+  sourceKind  MovementSourceKind @map("source_kind")
+  sourceRef   String?            @map("source_ref")
+  actorId     String?            @map("actor_id")
+  note        String?
+  prevStock   Int                @map("prev_stock")
+  nextStock   Int                @map("next_stock")
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([assetId, createdAt])
+  @@index([sourceKind, sourceRef])
+  @@map("movements")
+}
+
+// ============================================================
+// Sesiones de escaneo (prelista temporal)
+// ============================================================
+
+enum ScanSessionKind {
+  IN   // ingreso de stock (sumar al inventario)
+  OUT  // egreso de stock (restar del inventario)
+}
+
+enum ScanSessionStatus {
+  OPEN
+  CONFIRMED
+  CANCELLED
+}
+
+model ScanSession {
+  id          String            @id @default(cuid())
+  name        String
+  kind        ScanSessionKind
+  status      ScanSessionStatus @default(OPEN)
+  actorId     String?           @map("actor_id")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  confirmedAt DateTime?         @map("confirmed_at")
+
+  actor    User?         @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  lines    ScanLine[]
+  unknowns UnknownScan[]
+
+  @@index([status])
+  @@index([actorId, status])
+  @@map("scan_sessions")
+}
+
+model ScanLine {
+  id         String   @id @default(cuid())
+  sessionId  String   @map("session_id")
+  assetId    String   @map("asset_id")
+  // El barcode con el que se escaneó la primera vez (puede no ser el
+  // único barcode del producto si se vincularon varios alias).
+  barcode    String?
+  qty        Int      @default(1)
+  lastScanAt DateTime @map("last_scan_at")
+
+  session ScanSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  asset   Asset       @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  // Una línea por (sesión, asset) — los scans del mismo producto agrupan
+  // automáticamente vía qty++.
+  @@unique([sessionId, assetId])
+  @@map("scan_lines")
+}
+
+model UnknownScan {
+  id                String    @id @default(cuid())
+  sessionId         String    @map("session_id")
+  barcode           String
+  count             Int       @default(1)
+  firstScanAt       DateTime  @map("first_scan_at")
+  // Cuando el usuario lo vincula a un asset existente, se setean estos
+  // dos campos y la línea pasa a `scan_lines`. La fila queda como
+  // histórico de la resolución.
+  resolvedAt        DateTime? @map("resolved_at")
+  resolvedToAssetId String?   @map("resolved_to_asset_id")
+
+  session         ScanSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  resolvedToAsset Asset?      @relation(fields: [resolvedToAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, barcode])
+  @@map("unknown_scans")
+}
+
+// ============================================================
+// Compras
+// ============================================================
+
+enum PurchaseOrderStatus {
+  DRAFT
+  READY
+  ORDERED
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id        String              @id @default(cuid())
+  reference String              @unique
+  status    PurchaseOrderStatus @default(DRAFT)
+  note      String?
+  // Para el "plan del mes": YYYY-MM. Null si es una orden ad-hoc.
+  monthYear String?             @map("month_year")
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  lines    OrderLine[]
+  requests InternalRequest[]
+
+  @@index([status])
+  @@index([monthYear])
+  @@map("purchase_orders")
+}
+
+model OrderLine {
+  id          String  @id @default(cuid())
+  orderId     String  @map("order_id")
+  // Null si es un item adhoc (nuevo, no en catálogo todavía).
+  assetId     String? @map("asset_id")
+  name        String
+  brand       String
+  category    String
+  isNew       Boolean @default(false) @map("is_new")
+  qty         Int
+  receivedQty Int     @default(0) @map("received_qty")
+
+  order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  asset Asset?        @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@map("order_lines")
+}
+
+// ============================================================
+// Pedidos internos
+// ============================================================
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum RequestStatus {
+  PENDING
+  AWAITING_PURCHASE
+  READY_TO_DELIVER
+  DELIVERED
+  CANCELLED
+}
+
+model InternalRequest {
+  id            String        @id @default(cuid())
+  reference     String        @unique
+  requesterName String        @map("requester_name")
+  requesterTeam String        @map("requester_team")
+  itemName      String        @map("item_name")
+  assetId       String?       @map("asset_id")
+  brand         String
+  category      String
+  qty           Int
+  priority      Priority      @default(MEDIUM)
+  reason        String        @default("")
+  status        RequestStatus @default(PENDING)
+  linkedOrderId String?       @map("linked_order_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  asset       Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  linkedOrder PurchaseOrder? @relation(fields: [linkedOrderId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([priority])
+  @@map("internal_requests")
+}
+
+// ============================================================
+// Reporte mensual: estado de envío
+// ============================================================
+
+model MonthlyReportSent {
+  id        String   @id @default(cuid())
+  monthYear String   @unique @map("month_year") // YYYY-MM
+  sentAt    DateTime @default(now()) @map("sent_at")
+  sentById  String?  @map("sent_by_id")
+
+  @@map("monthly_reports_sent")
+}
+
+// ============================================================
+// Audit log (acciones de settings, configuración, etc.)
+// ============================================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  detail    String?
+  note      String?
+  actorId   String?  @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}
