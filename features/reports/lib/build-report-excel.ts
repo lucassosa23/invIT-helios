@@ -1,6 +1,6 @@
 "use client";
 
-import * as XLSX from "xlsx";
+import type * as XLSX from "xlsx";
 
 import {
   statusFromStock,
@@ -11,6 +11,11 @@ import type { PurchaseOrder } from "@/features/procurement/lib/orders";
 import type { InternalRequest } from "@/features/requests/lib/requests";
 
 import type { SectionToggles } from "./report-config";
+
+// xlsx pesa ~600KB y solo se necesita al armar el adjunto del reporte
+// mensual. Lazy-load para que el bundle de /reports no lo arrastre.
+type XLSXValue = typeof import("xlsx");
+const loadXLSX = (): Promise<XLSXValue> => import("xlsx");
 
 type Opts = {
   monthLabel: string;
@@ -53,7 +58,7 @@ function freezeHeader(ws: XLSX.WorkSheet) {
   ws["!freeze"] = { xSplit: 0, ySplit: 1 };
 }
 
-function buildSummary(opts: Opts): XLSX.WorkSheet {
+function buildSummary(X: XLSXValue, opts: Opts): XLSX.WorkSheet {
   const rows: (string | number)[][] = [
     ["REPORTE MENSUAL DE INVENTARIO Y COMPRAS"],
     [`Período: ${opts.monthLabel}`],
@@ -120,12 +125,13 @@ function buildSummary(opts: Opts): XLSX.WorkSheet {
     );
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const ws = X.utils.aoa_to_sheet(rows);
   ws["!cols"] = [{ wch: 42 }, { wch: 16 }];
   return ws;
 }
 
 function buildInventorySheet(
+  X: XLSXValue,
   items: Asset[],
   locations: Location[],
 ): XLSX.WorkSheet {
@@ -155,7 +161,7 @@ function buildInventorySheet(
     Ubicación: locationMap[a.locationId] ?? "",
   }));
 
-  const ws = XLSX.utils.json_to_sheet(rows, {
+  const ws = X.utils.json_to_sheet(rows, {
     header: [
       "Código",
       "Nombre",
@@ -192,7 +198,7 @@ function buildInventorySheet(
   return ws;
 }
 
-function buildPlanSheet(plan: PurchaseOrder): XLSX.WorkSheet {
+function buildPlanSheet(X: XLSXValue, plan: PurchaseOrder): XLSX.WorkSheet {
   const rows = plan.lines.map((l) => ({
     Item: l.name,
     Marca: l.brand,
@@ -202,7 +208,7 @@ function buildPlanSheet(plan: PurchaseOrder): XLSX.WorkSheet {
     SKU: l.assetId ?? "",
   }));
 
-  const ws = XLSX.utils.json_to_sheet(rows, {
+  const ws = X.utils.json_to_sheet(rows, {
     header: ["Item", "Marca", "Categoría", "Cantidad", "Nuevo", "SKU"],
   });
   ws["!cols"] = [
@@ -222,7 +228,10 @@ function buildPlanSheet(plan: PurchaseOrder): XLSX.WorkSheet {
   return ws;
 }
 
-function buildReadyOrdersSheet(orders: PurchaseOrder[]): XLSX.WorkSheet {
+function buildReadyOrdersSheet(
+  X: XLSXValue,
+  orders: PurchaseOrder[],
+): XLSX.WorkSheet {
   const rows: Array<Record<string, string | number>> = [];
   for (const o of orders) {
     for (const l of o.lines) {
@@ -238,7 +247,7 @@ function buildReadyOrdersSheet(orders: PurchaseOrder[]): XLSX.WorkSheet {
     }
   }
 
-  const ws = XLSX.utils.json_to_sheet(rows, {
+  const ws = X.utils.json_to_sheet(rows, {
     header: [
       "Orden",
       "Item",
@@ -267,7 +276,10 @@ function buildReadyOrdersSheet(orders: PurchaseOrder[]): XLSX.WorkSheet {
   return ws;
 }
 
-function buildPendingSheet(requests: InternalRequest[]): XLSX.WorkSheet {
+function buildPendingSheet(
+  X: XLSXValue,
+  requests: InternalRequest[],
+): XLSX.WorkSheet {
   const rows = requests.map((r) => ({
     Referencia: r.reference,
     Solicitante: r.requesterName,
@@ -282,7 +294,7 @@ function buildPendingSheet(requests: InternalRequest[]): XLSX.WorkSheet {
     "Fecha pedido": r.createdAt.toLocaleDateString("es-AR"),
   }));
 
-  const ws = XLSX.utils.json_to_sheet(rows, {
+  const ws = X.utils.json_to_sheet(rows, {
     header: [
       "Referencia",
       "Solicitante",
@@ -320,43 +332,44 @@ function buildPendingSheet(requests: InternalRequest[]): XLSX.WorkSheet {
 }
 
 /** Genera el Excel completo del reporte mensual y devuelve base64 del binario. */
-export function buildReportExcelBase64(opts: Opts): string {
-  const wb = XLSX.utils.book_new();
+export async function buildReportExcelBase64(opts: Opts): Promise<string> {
+  const X = await loadXLSX();
+  const wb = X.utils.book_new();
 
   // Resumen siempre primero
-  XLSX.utils.book_append_sheet(wb, buildSummary(opts), "Resumen");
+  X.utils.book_append_sheet(wb, buildSummary(X, opts), "Resumen");
 
   if (opts.sections.inventory && opts.items.length > 0) {
-    XLSX.utils.book_append_sheet(
+    X.utils.book_append_sheet(
       wb,
-      buildInventorySheet(opts.items, opts.locations),
+      buildInventorySheet(X, opts.items, opts.locations),
       "Stock bajo",
     );
   }
   if (opts.sections.plan && opts.plan && opts.plan.lines.length > 0) {
-    XLSX.utils.book_append_sheet(
+    X.utils.book_append_sheet(
       wb,
-      buildPlanSheet(opts.plan),
+      buildPlanSheet(X, opts.plan),
       "Plan del mes",
     );
   }
   if (opts.sections.readyOrders && opts.readyOrders.length > 0) {
-    XLSX.utils.book_append_sheet(
+    X.utils.book_append_sheet(
       wb,
-      buildReadyOrdersSheet(opts.readyOrders),
+      buildReadyOrdersSheet(X, opts.readyOrders),
       "Órdenes listas",
     );
   }
   if (opts.sections.pendingRequests && opts.pendingRequests.length > 0) {
-    XLSX.utils.book_append_sheet(
+    X.utils.book_append_sheet(
       wb,
-      buildPendingSheet(opts.pendingRequests),
+      buildPendingSheet(X, opts.pendingRequests),
       "Pedidos pendientes",
     );
   }
 
-  // XLSX.write con type:"base64" da directamente la cadena base64 del binario.
-  const base64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+  // X.write con type:"base64" da directamente la cadena base64 del binario.
+  const base64 = X.write(wb, { type: "base64", bookType: "xlsx" });
   return base64;
 }
 

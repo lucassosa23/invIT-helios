@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   AlertOctagon,
   AlertTriangle,
@@ -32,7 +32,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { Asset } from "@/lib/fake-data";
-import { loadInventory } from "@/lib/storage";
+import { useInventory } from "@/lib/hooks";
 
 import {
   createEmptyOrder,
@@ -106,64 +106,86 @@ function requestIdFromLine(line: OrderLine): string | null {
     : null;
 }
 
+function computeOpenRequests(
+  editing: PurchaseOrder | null,
+): InternalRequest[] {
+  return loadRequests().filter(
+    (r) =>
+      r.status === "pending" ||
+      (!!editing &&
+        r.linkedOrderId === editing.id &&
+        r.status === "awaiting_purchase"),
+  );
+}
+
+function computeActiveOrderAssetIds(
+  editing: PurchaseOrder | null,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const o of loadOrders()) {
+    if (o.status === "received" || o.status === "cancelled") continue;
+    if (editing && o.id === editing.id) continue;
+    for (const l of o.lines) {
+      if (l.assetId) ids.add(l.assetId);
+    }
+  }
+  return ids;
+}
+
 export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
-  const [inventory, setInventory] = useState<Asset[]>([]);
-  const [lines, setLines] = useState<OrderLine[]>([]);
-  const [note, setNote] = useState("");
-  const [tab, setTab] = useState<string>("suggestions");
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="flex max-h-[calc(100svh-2rem)] w-[calc(100vw-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl md:max-w-5xl lg:max-w-6xl"
+      >
+        {open && (
+          <NewOrderBody
+            editing={editing ?? null}
+            onClose={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NewOrderBody({
+  editing,
+  onClose,
+}: {
+  editing: PurchaseOrder | null;
+  onClose: () => void;
+}) {
+  const inventory = useInventory();
+
+  const [openRequests] = useState<InternalRequest[]>(() =>
+    computeOpenRequests(editing),
+  );
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() =>
+    loadDismissed(),
+  );
+  const [activeOrderAssetIds] = useState<Set<string>>(() =>
+    computeActiveOrderAssetIds(editing),
+  );
+
+  const [lines, setLines] = useState<OrderLine[]>(() =>
+    editing ? editing.lines : [],
+  );
+  const [note, setNote] = useState(() => editing?.note ?? "");
+  const [tab, setTab] = useState<string>(() => {
+    if (editing) return openRequests.length > 0 ? "requests" : "search";
+    return openRequests.some((r) => r.status === "pending")
+      ? "requests"
+      : "suggestions";
+  });
   const [search, setSearch] = useState("");
   const [adhocName, setAdhocName] = useState("");
   const [adhocBrand, setAdhocBrand] = useState("");
   const [adhocCategory, setAdhocCategory] = useState("");
   const [adhocQty, setAdhocQty] = useState(1);
-  const [openRequests, setOpenRequests] = useState<InternalRequest[]>([]);
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [activeOrderAssetIds, setActiveOrderAssetIds] = useState<Set<string>>(
-    new Set(),
-  );
 
   const linesEndRef = useRef<HTMLLIElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setInventory(loadInventory() ?? []);
-    setDismissedIds(loadDismissed());
-    // Items que ya están en otras órdenes activas (plan + drafts + ready +
-    // ordered + parciales). No incluye la orden que se está editando.
-    const otherActiveIds = new Set<string>();
-    for (const o of loadOrders()) {
-      if (o.status === "received" || o.status === "cancelled") continue;
-      if (editing && o.id === editing.id) continue;
-      for (const l of o.lines) {
-        if (l.assetId) otherActiveIds.add(l.assetId);
-      }
-    }
-    setActiveOrderAssetIds(otherActiveIds);
-
-    const allRequests = loadRequests();
-    // Pendientes + los que ya están vinculados a esta orden (en editing)
-    const editableRequests = allRequests.filter(
-      (r) =>
-        r.status === "pending" ||
-        (editing && r.linkedOrderId === editing.id && r.status === "awaiting_purchase"),
-    );
-    setOpenRequests(editableRequests);
-
-    if (editing) {
-      setLines(editing.lines);
-      setNote(editing.note ?? "");
-      setTab(editableRequests.length > 0 ? "requests" : "search");
-    } else {
-      setLines([]);
-      setNote("");
-      setTab(editableRequests.some((r) => r.status === "pending") ? "requests" : "suggestions");
-    }
-    setSearch("");
-    setAdhocName("");
-    setAdhocBrand("");
-    setAdhocCategory("");
-    setAdhocQty(1);
-  }, [open, editing]);
 
   const suggestions = useMemo(() => {
     // No sugerimos items que ya están en otra orden activa (plan + ready +
@@ -404,19 +426,15 @@ export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
       );
     }
 
-    onOpenChange(false);
+    onClose();
   };
 
   const totalLines = lines.length;
   const total = lines.reduce((s, l) => s + l.qty, 0);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className="flex max-h-[calc(100svh-2rem)] w-[calc(100vw-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl md:max-w-5xl lg:max-w-6xl"
-      >
-        <DialogHeader className="gap-1 border-b border-border/70 bg-gradient-to-b from-card/60 to-card/0 px-5 py-4 sm:px-6">
+    <>
+      <DialogHeader className="gap-1 border-b border-border/70 bg-gradient-to-b from-card/60 to-card/0 px-5 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <DialogTitle className="truncate text-[16px] font-semibold tracking-tight">
@@ -436,7 +454,7 @@ export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
               type="button"
               variant="ghost"
               size="icon-sm"
-              onClick={() => onOpenChange(false)}
+              onClick={onClose}
               aria-label="Cerrar"
               className="-mr-1 -mt-1 shrink-0 text-muted-foreground hover:text-foreground"
             >
@@ -969,7 +987,7 @@ export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => onOpenChange(false)}
+              onClick={onClose}
             >
               Cancelar
             </Button>
@@ -993,8 +1011,7 @@ export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
             </Button>
           </div>
         </footer>
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }
 

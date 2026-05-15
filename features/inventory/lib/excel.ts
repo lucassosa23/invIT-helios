@@ -1,12 +1,14 @@
 "use client";
 
-import * as XLSX from "xlsx";
-
 import {
   statusFromStock,
   type Asset,
   type Location,
 } from "@/lib/fake-data";
+
+// xlsx pesa ~600KB. Lazy-load para no inflar el bundle de /inventory; el
+// chunk solo se descarga la primera vez que se importa/exporta/parsea.
+const loadXLSX = () => import("xlsx");
 
 const STATUS_LABEL: Record<string, string> = {
   healthy: "Disponible",
@@ -37,10 +39,11 @@ const HEADERS = [
   "Ubicación",
 ] as const;
 
-export function exportInventoryToExcel(
+export async function exportInventoryToExcel(
   assets: Asset[],
   locations: Location[],
 ) {
+  const XLSX = await loadXLSX();
   const locationMap = Object.fromEntries(locations.map((l) => [l.id, l.name]));
 
   const sorted = [...assets].sort((a, b) => {
@@ -147,7 +150,8 @@ export function exportInventoryToExcel(
   XLSX.writeFile(wb, `inventario_${todayStr()}.xlsx`);
 }
 
-export function downloadTemplate(locations: Location[]) {
+export async function downloadTemplate(locations: Location[]) {
+  const XLSX = await loadXLSX();
   const sample = [
     {
       Código: "NOT-LEN-0001",
@@ -226,6 +230,7 @@ export async function parseExcelFile(
   file: File,
   locations: Location[],
 ): Promise<ParsedRow[]> {
+  const XLSX = await loadXLSX();
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const sheetName = wb.SheetNames[0];

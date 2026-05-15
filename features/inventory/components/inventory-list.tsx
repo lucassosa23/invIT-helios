@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Download,
@@ -21,9 +21,10 @@ import { statusFromStock } from "@/lib/fake-data";
 import type { Asset, Location, Status } from "@/lib/fake-data";
 import {
   clearInventory,
-  loadInventory,
+  getInventorySnapshot,
   saveInventory,
 } from "@/lib/storage";
+import { useInventory, useIsMounted } from "@/lib/hooks";
 
 import {
   downloadTemplate,
@@ -49,49 +50,42 @@ const STATUS_OPTIONS: Array<{
 ];
 
 type Props = {
-  initialAssets: Asset[];
   locations: Location[];
+  initialQuery?: string;
+  initialStatus?: "all" | Status;
 };
 
 let newIdSeed = 1;
 
-export function InventoryList({ initialAssets, locations }: Props) {
-  const [assets, setAssets] = useState<Asset[]>(initialAssets);
-  const [hydrated, setHydrated] = useState(false);
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"all" | Status>("all");
+function applyInventoryUpdate(
+  updater: Asset[] | ((prev: Asset[]) => Asset[]),
+) {
+  const prev = getInventorySnapshot();
+  const next =
+    typeof updater === "function"
+      ? (updater as (p: Asset[]) => Asset[])(prev)
+      : updater;
+  saveInventory(next);
+}
+
+export function InventoryList({
+  locations,
+  initialQuery = "",
+  initialStatus = "all",
+}: Props) {
+  const assets = useInventory();
+  const hydrated = useIsMounted();
+
+  const [query, setQuery] = useState(initialQuery);
+  const [status, setStatus] = useState<"all" | Status>(initialStatus);
   const [category, setCategory] = useState<string>("all");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  // Lee ?q= y ?filter= del URL al montar (sin useSearchParams para evitar
-  // problemas de Suspense boundary en Next 16).
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const q = params.get("q");
-    const f = params.get("filter");
-    if (q) setQuery(q);
-    if (f === "critical" || f === "low") setStatus(f as Status);
-  }, []);
 
   const [importRows, setImportRows] = useState<ParsedRow[]>([]);
   const [importFileName, setImportFileName] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const stored = loadInventory();
-    if (stored && stored.length > 0) {
-      setAssets(stored);
-    }
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    saveInventory(assets);
-  }, [assets, hydrated]);
 
   const locationMap = useMemo(
     () => Object.fromEntries(locations.map((l) => [l.id, l])),
@@ -141,7 +135,7 @@ export function InventoryList({ initialAssets, locations }: Props) {
 
   const handleSubmit = (values: ItemFormValues) => {
     if (editingId) {
-      setAssets((prev) =>
+      applyInventoryUpdate((prev) =>
         prev.map((a) =>
           a.id === editingId
             ? {
@@ -176,7 +170,7 @@ export function InventoryList({ initialAssets, locations }: Props) {
         status: statusFromStock(values.stock, values.threshold),
         updatedAt: new Date(),
       };
-      setAssets((prev) => [asset, ...prev]);
+      applyInventoryUpdate((prev) => [asset, ...prev]);
       toast.success("Item agregado", {
         description: values.name,
       });
@@ -186,7 +180,7 @@ export function InventoryList({ initialAssets, locations }: Props) {
   };
 
   const handleAdjust = (id: string, delta: number) => {
-    setAssets((prev) =>
+    applyInventoryUpdate((prev) =>
       prev.map((a) => {
         if (a.id !== id) return a;
         const newStock = Math.max(0, a.stock + delta);
@@ -204,11 +198,11 @@ export function InventoryList({ initialAssets, locations }: Props) {
   const handleDelete = (id: string) => {
     const target = assets.find((a) => a.id === id);
     if (!target) return;
-    setAssets((prev) => prev.filter((a) => a.id !== id));
+    applyInventoryUpdate((prev) => prev.filter((a) => a.id !== id));
     toast(`${target.name} eliminado`, {
       action: {
         label: "Deshacer",
-        onClick: () => setAssets((prev) => [target, ...prev]),
+        onClick: () => applyInventoryUpdate((prev) => [target, ...prev]),
       },
     });
   };
@@ -236,7 +230,7 @@ export function InventoryList({ initialAssets, locations }: Props) {
 
   const handleReplace = () => {
     const next = rowsToAssets(importRows);
-    setAssets(next);
+    applyInventoryUpdate(next);
     setImportOpen(false);
     toast.success(`Inventario reemplazado`, {
       description: `${next.length} items importados`,
@@ -245,36 +239,35 @@ export function InventoryList({ initialAssets, locations }: Props) {
 
   const handleAppend = () => {
     const next = rowsToAssets(importRows);
-    setAssets((prev) => [...next, ...prev]);
+    applyInventoryUpdate((prev) => [...next, ...prev]);
     setImportOpen(false);
     toast.success(`Items agregados`, {
       description: `${next.length} items sumados al inventario`,
     });
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (assets.length === 0) {
       toast.error("No hay items para exportar");
       return;
     }
-    exportInventoryToExcel(assets, locations);
+    await exportInventoryToExcel(assets, locations);
     toast.success("Exportado a Excel");
   };
 
-  const handleTemplate = () => {
-    downloadTemplate(locations);
+  const handleTemplate = async () => {
+    await downloadTemplate(locations);
     toast.success("Plantilla descargada");
   };
 
   const handleClearAll = () => {
     if (assets.length === 0) return;
     const snapshot = assets;
-    setAssets([]);
     clearInventory();
     toast(`Inventario vaciado`, {
       action: {
         label: "Deshacer",
-        onClick: () => setAssets(snapshot),
+        onClick: () => applyInventoryUpdate(snapshot),
       },
     });
   };

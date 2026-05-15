@@ -237,7 +237,7 @@ export function ReportBuilder() {
     setSending(true);
     try {
       // Generar el Excel adjunto con los mismos datos del reporte
-      const excelBase64 = buildReportExcelBase64({
+      const excelBase64 = await buildReportExcelBase64({
         monthLabel,
         sections: config.sections,
         items: inventoryItems,

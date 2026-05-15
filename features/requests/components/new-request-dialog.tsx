@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -25,7 +25,8 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { Asset, Priority } from "@/lib/fake-data";
-import { loadInventory } from "@/lib/storage";
+import { getInventorySnapshot } from "@/lib/storage";
+import { useInventory } from "@/lib/hooks";
 
 import {
   loadRequests,
@@ -47,64 +48,72 @@ type ItemSource = "catalog" | "adhoc";
 const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
 
 export function NewRequestDialog({ open, onOpenChange, editing }: Props) {
-  const [inventory, setInventory] = useState<Asset[]>([]);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="flex max-h-[calc(100svh-2rem)] w-[calc(100vw-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+      >
+        {open && (
+          <NewRequestBody
+            editing={editing ?? null}
+            onClose={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-  const [requesterName, setRequesterName] = useState("");
-  const [requesterTeam, setRequesterTeam] = useState("");
+function NewRequestBody({
+  editing,
+  onClose,
+}: {
+  editing: InternalRequest | null;
+  onClose: () => void;
+}) {
+  const inventory = useInventory();
 
-  const [source, setSource] = useState<ItemSource>("catalog");
-  const [search, setSearch] = useState("");
-  const [pickedAsset, setPickedAsset] = useState<Asset | null>(null);
+  const [requesterName, setRequesterName] = useState(
+    () => editing?.requesterName ?? "",
+  );
+  const [requesterTeam, setRequesterTeam] = useState(
+    () => editing?.requesterTeam ?? "",
+  );
 
-  const [adhocName, setAdhocName] = useState("");
-  const [adhocBrand, setAdhocBrand] = useState("");
-  const [adhocCategory, setAdhocCategory] = useState("");
-
-  const [qty, setQty] = useState(1);
-  const [priority, setPriority] = useState<Priority>("medium");
-  const [reason, setReason] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    setInventory(loadInventory() ?? []);
-    if (editing) {
-      setRequesterName(editing.requesterName);
-      setRequesterTeam(editing.requesterTeam);
-      if (editing.assetId) {
-        setSource("catalog");
-        const asset = (loadInventory() ?? []).find(
-          (a) => a.id === editing.assetId,
-        );
-        setPickedAsset(asset ?? null);
-        setSearch(asset?.name ?? editing.itemName);
-        setAdhocName("");
-        setAdhocBrand("");
-        setAdhocCategory("");
-      } else {
-        setSource("adhoc");
-        setPickedAsset(null);
-        setSearch("");
-        setAdhocName(editing.itemName);
-        setAdhocBrand(editing.brand);
-        setAdhocCategory(editing.category);
-      }
-      setQty(editing.qty);
-      setPriority(editing.priority);
-      setReason(editing.reason);
-    } else {
-      setRequesterName("");
-      setRequesterTeam("");
-      setSource("catalog");
-      setSearch("");
-      setPickedAsset(null);
-      setAdhocName("");
-      setAdhocBrand("");
-      setAdhocCategory("");
-      setQty(1);
-      setPriority("medium");
-      setReason("");
+  const [source, setSource] = useState<ItemSource>(() =>
+    editing && !editing.assetId ? "adhoc" : "catalog",
+  );
+  const [pickedAsset, setPickedAsset] = useState<Asset | null>(() => {
+    if (!editing?.assetId) return null;
+    const snap = getInventorySnapshot();
+    return snap.find((a) => a.id === editing.assetId) ?? null;
+  });
+  const [search, setSearch] = useState(() => {
+    if (!editing) return "";
+    if (editing.assetId) {
+      const snap = getInventorySnapshot();
+      const asset = snap.find((a) => a.id === editing.assetId);
+      return asset?.name ?? editing.itemName;
     }
-  }, [open, editing]);
+    return "";
+  });
+
+  const [adhocName, setAdhocName] = useState(() =>
+    editing && !editing.assetId ? editing.itemName : "",
+  );
+  const [adhocBrand, setAdhocBrand] = useState(() =>
+    editing && !editing.assetId ? editing.brand : "",
+  );
+  const [adhocCategory, setAdhocCategory] = useState(() =>
+    editing && !editing.assetId ? editing.category : "",
+  );
+
+  const [qty, setQty] = useState(() => editing?.qty ?? 1);
+  const [priority, setPriority] = useState<Priority>(
+    () => editing?.priority ?? "medium",
+  );
+  const [reason, setReason] = useState(() => editing?.reason ?? "");
 
   const catalogResults = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -114,11 +123,13 @@ export function NewRequestDialog({ open, onOpenChange, editing }: Props) {
           return hay.includes(q);
         })
       : inventory.slice();
-    // Healthy primero (puede entregarse ya), luego low, luego critical/out
     const rank = (s: Asset["status"]) =>
       s === "healthy" ? 0 : s === "low" ? 1 : s === "critical" ? 2 : 3;
     return filtered
-      .sort((a, b) => rank(a.status) - rank(b.status) || a.name.localeCompare(b.name))
+      .sort(
+        (a, b) =>
+          rank(a.status) - rank(b.status) || a.name.localeCompare(b.name),
+      )
       .slice(0, 30);
   }, [inventory, search]);
 
@@ -204,327 +215,317 @@ export function NewRequestDialog({ open, onOpenChange, editing }: Props) {
       });
     }
 
-    onOpenChange(false);
+    onClose();
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        showCloseButton={false}
-        className="flex max-h-[calc(100svh-2rem)] w-[calc(100vw-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
-      >
-        <DialogHeader className="gap-1 border-b border-border/70 bg-gradient-to-b from-card/60 to-card/0 px-5 py-4 sm:px-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <DialogTitle className="truncate text-[16px] font-semibold tracking-tight">
-                {editing ? `Editar pedido · ${editing.reference}` : "Nuevo pedido"}
-              </DialogTitle>
-              <DialogDescription className="mt-1 text-[12.5px]">
-                Registrá un pedido de alguien de la empresa. Si no hay stock se
-                sumará a la compra del mes.
-              </DialogDescription>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => onOpenChange(false)}
-              aria-label="Cerrar"
-              className="-mr-1 -mt-1 shrink-0 text-muted-foreground hover:text-foreground"
-            >
-              <X className="size-4" />
-            </Button>
+    <>
+      <DialogHeader className="gap-1 border-b border-border/70 bg-gradient-to-b from-card/60 to-card/0 px-5 py-4 sm:px-6">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <DialogTitle className="truncate text-[16px] font-semibold tracking-tight">
+              {editing ? `Editar pedido · ${editing.reference}` : "Nuevo pedido"}
+            </DialogTitle>
+            <DialogDescription className="mt-1 text-[12.5px]">
+              Registrá un pedido de alguien de la empresa. Si no hay stock se
+              sumará a la compra del mes.
+            </DialogDescription>
           </div>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-5 overflow-y-auto p-5 sm:p-6">
-          {/* Solicitante */}
-          <section className="grid gap-3.5 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label
-                htmlFor="req-name"
-                className="!gap-1 text-[12.5px] font-medium text-foreground"
-              >
-                <span>
-                  Solicitante
-                  <span className="ml-0.5 text-status-critical">*</span>
-                </span>
-              </Label>
-              <Input
-                id="req-name"
-                value={requesterName}
-                onChange={(e) => setRequesterName(e.target.value)}
-                placeholder="ej. Florencia Acosta"
-                className="h-10"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="req-team" className="text-[12.5px] font-medium text-foreground">
-                Equipo / Área
-              </Label>
-              <Input
-                id="req-team"
-                value={requesterTeam}
-                onChange={(e) => setRequesterTeam(e.target.value)}
-                placeholder="ej. Atención al paciente"
-                className="h-10"
-              />
-            </div>
-          </section>
-
-          {/* Item solicitado */}
-          <section className="flex flex-col gap-2">
-            <Label className="!gap-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              <span>
-                Item solicitado
-                <span className="ml-0.5 text-status-critical">*</span>
-              </span>
-            </Label>
-
-            <div className="rounded-xl bg-card p-3 ring-1 ring-foreground/10 sm:p-4">
-              <Tabs
-                value={source}
-                onValueChange={(v) => {
-                  setSource(String(v) as ItemSource);
-                  setPickedAsset(null);
-                  setSearch("");
-                }}
-                className="flex flex-col gap-0"
-              >
-                <TabsList className="mb-3 h-9 w-full">
-                  <TabsTrigger value="catalog" className="gap-2">
-                    <Search className="size-3.5" />
-                    Del catálogo
-                  </TabsTrigger>
-                  <TabsTrigger value="adhoc" className="gap-2">
-                    <PackagePlus className="size-3.5" />
-                    Nuevo item
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="catalog" className="m-0 outline-none">
-                  {pickedAsset ? (
-                    <SelectedAsset
-                      asset={pickedAsset}
-                      qty={qty}
-                      onChange={() => {
-                        setPickedAsset(null);
-                        setSearch("");
-                      }}
-                      stockTone={stockTone}
-                    />
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          value={search}
-                          onChange={(e) => setSearch(e.target.value)}
-                          placeholder="Buscar por nombre, marca o código…"
-                          className="h-10 pl-9"
-                        />
-                      </div>
-
-                      {inventory.length === 0 ? (
-                        <EmptyHint>
-                          No hay items en el inventario todavía.
-                        </EmptyHint>
-                      ) : catalogResults.length === 0 ? (
-                        <EmptyHint>
-                          Sin resultados para “{search.trim()}”. Probá la pestaña{" "}
-                          <button
-                            type="button"
-                            onClick={() => setSource("adhoc")}
-                            className="font-semibold text-primary hover:underline"
-                          >
-                            Nuevo item
-                          </button>
-                          .
-                        </EmptyHint>
-                      ) : (
-                        <>
-                          <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                            <span>
-                              {search.trim()
-                                ? `${catalogResults.length} resultado${catalogResults.length === 1 ? "" : "s"}`
-                                : "Disponibles primero"}
-                            </span>
-                            <span>Stock</span>
-                          </div>
-                          <ul className="max-h-[260px] divide-y divide-border/50 overflow-y-auto rounded-lg bg-background/40 ring-1 ring-foreground/10">
-                            {catalogResults.map((a) => (
-                              <li key={a.id}>
-                                <button
-                                  type="button"
-                                  onClick={() => setPickedAsset(a)}
-                                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
-                                >
-                                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted/60 text-muted-foreground ring-1 ring-foreground/10">
-                                    <Package className="size-4" />
-                                  </span>
-                                  <div className="min-w-0 flex-1">
-                                    <div className="truncate text-[13px] font-medium">
-                                      {a.name}
-                                    </div>
-                                    <div className="truncate text-[11.5px] text-muted-foreground">
-                                      {a.brand || "—"} · {a.category}
-                                    </div>
-                                  </div>
-                                  <span
-                                    className={cn(
-                                      "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ring-1",
-                                      stockTone(a.status),
-                                    )}
-                                    title={`Stock actual: ${a.stock} · mínimo ${a.threshold}`}
-                                  >
-                                    <span className="size-1.5 rounded-full bg-current opacity-80" />
-                                    {a.stock}
-                                  </span>
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="adhoc" className="m-0 outline-none">
-                  <div className="grid gap-3.5 sm:grid-cols-2">
-                    <div className="grid gap-1.5 sm:col-span-2">
-                      <Label
-                        htmlFor="adhoc-req-name"
-                        className="!gap-1 text-[12.5px] font-medium text-foreground"
-                      >
-                        <span>
-                          Nombre del item
-                          <span className="ml-0.5 text-status-critical">*</span>
-                        </span>
-                      </Label>
-                      <Input
-                        id="adhoc-req-name"
-                        value={adhocName}
-                        onChange={(e) => setAdhocName(e.target.value)}
-                        placeholder="ej. Adaptador USB-C a HDMI"
-                        className="h-10"
-                      />
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label
-                        htmlFor="adhoc-req-brand"
-                        className="text-[12.5px] font-medium text-foreground"
-                      >
-                        Marca
-                      </Label>
-                      <Input
-                        id="adhoc-req-brand"
-                        value={adhocBrand}
-                        onChange={(e) => setAdhocBrand(e.target.value)}
-                        placeholder="ej. Anker"
-                        className="h-10"
-                      />
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label
-                        htmlFor="adhoc-req-cat"
-                        className="text-[12.5px] font-medium text-foreground"
-                      >
-                        Categoría
-                      </Label>
-                      <Input
-                        id="adhoc-req-cat"
-                        value={adhocCategory}
-                        onChange={(e) => setAdhocCategory(e.target.value)}
-                        placeholder="ej. Accesorio"
-                        className="h-10"
-                      />
-                    </div>
-                    <p className="text-[11.5px] text-muted-foreground sm:col-span-2">
-                      Este item se sumará a la próxima compra del mes al aprobar
-                      el pedido.
-                    </p>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </div>
-          </section>
-
-          {/* Cantidad + Prioridad */}
-          <section className="flex flex-wrap items-start gap-4 sm:flex-nowrap">
-            <div className="flex w-32 shrink-0 flex-col gap-1.5">
-              <Label
-                htmlFor="req-qty"
-                className="!gap-1 text-[12.5px] font-medium text-foreground"
-              >
-                <span>
-                  Cantidad
-                  <span className="ml-0.5 text-status-critical">*</span>
-                </span>
-              </Label>
-              <NumberInput
-                id="req-qty"
-                min={1}
-                fallback={1}
-                value={qty}
-                onChange={setQty}
-                className="h-10 text-center font-mono tabular-nums"
-              />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Label className="text-[12.5px] font-medium text-foreground">
-                Prioridad
-              </Label>
-              <div className="flex flex-wrap gap-1.5">
-                {PRIORITIES.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setPriority(p)}
-                    className={cn(
-                      "rounded-full px-3 py-1.5 text-[11.5px] font-medium ring-1 transition-colors",
-                      priority === p
-                        ? PRIORITY_TONE[p]
-                        : "bg-muted/40 text-muted-foreground ring-foreground/10 hover:bg-muted/60",
-                    )}
-                  >
-                    {PRIORITY_LABEL[p]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className="grid gap-1.5">
-            <Label htmlFor="req-reason" className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              Motivo <span className="font-normal normal-case tracking-normal text-muted-foreground/70">(opcional)</span>
-            </Label>
-            <textarea
-              id="req-reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="ej. Su equipo actual quedó sin stock de un repuesto crítico"
-              rows={2}
-              className="resize-none rounded-md border border-input bg-input/30 px-3 py-2 text-[13px] outline-none transition-colors hover:bg-input/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-            />
-          </section>
-        </div>
-
-        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-muted/30 px-5 py-3 sm:px-6">
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            onClick={() => onOpenChange(false)}
+            size="icon-sm"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="-mr-1 -mt-1 shrink-0 text-muted-foreground hover:text-foreground"
           >
-            Cancelar
+            <X className="size-4" />
           </Button>
-          <Button type="button" size="sm" onClick={submit}>
-            {editing ? "Guardar cambios" : "Crear pedido"}
-          </Button>
-        </footer>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </DialogHeader>
+
+      <div className="flex flex-col gap-5 overflow-y-auto p-5 sm:p-6">
+        {/* Solicitante */}
+        <section className="grid gap-3.5 sm:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label
+              htmlFor="req-name"
+              className="!gap-1 text-[12.5px] font-medium text-foreground"
+            >
+              <span>
+                Solicitante
+                <span className="ml-0.5 text-status-critical">*</span>
+              </span>
+            </Label>
+            <Input
+              id="req-name"
+              value={requesterName}
+              onChange={(e) => setRequesterName(e.target.value)}
+              placeholder="ej. Florencia Acosta"
+              className="h-10"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="req-team" className="text-[12.5px] font-medium text-foreground">
+              Equipo / Área
+            </Label>
+            <Input
+              id="req-team"
+              value={requesterTeam}
+              onChange={(e) => setRequesterTeam(e.target.value)}
+              placeholder="ej. Atención al paciente"
+              className="h-10"
+            />
+          </div>
+        </section>
+
+        {/* Item solicitado */}
+        <section className="flex flex-col gap-2">
+          <Label className="!gap-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+            <span>
+              Item solicitado
+              <span className="ml-0.5 text-status-critical">*</span>
+            </span>
+          </Label>
+
+          <div className="rounded-xl bg-card p-3 ring-1 ring-foreground/10 sm:p-4">
+            <Tabs
+              value={source}
+              onValueChange={(v) => {
+                setSource(String(v) as ItemSource);
+                setPickedAsset(null);
+                setSearch("");
+              }}
+              className="flex flex-col gap-0"
+            >
+              <TabsList className="mb-3 h-9 w-full">
+                <TabsTrigger value="catalog" className="gap-2">
+                  <Search className="size-3.5" />
+                  Del catálogo
+                </TabsTrigger>
+                <TabsTrigger value="adhoc" className="gap-2">
+                  <PackagePlus className="size-3.5" />
+                  Nuevo item
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="catalog" className="m-0 outline-none">
+                {pickedAsset ? (
+                  <SelectedAsset
+                    asset={pickedAsset}
+                    qty={qty}
+                    onChange={() => {
+                      setPickedAsset(null);
+                      setSearch("");
+                    }}
+                    stockTone={stockTone}
+                  />
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Buscar por nombre, marca o código…"
+                        className="h-10 pl-9"
+                      />
+                    </div>
+
+                    {inventory.length === 0 ? (
+                      <EmptyHint>
+                        No hay items en el inventario todavía.
+                      </EmptyHint>
+                    ) : catalogResults.length === 0 ? (
+                      <EmptyHint>
+                        Sin resultados para “{search.trim()}”. Probá la pestaña{" "}
+                        <button
+                          type="button"
+                          onClick={() => setSource("adhoc")}
+                          className="font-semibold text-primary hover:underline"
+                        >
+                          Nuevo item
+                        </button>
+                        .
+                      </EmptyHint>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                          <span>
+                            {search.trim()
+                              ? `${catalogResults.length} resultado${catalogResults.length === 1 ? "" : "s"}`
+                              : "Disponibles primero"}
+                          </span>
+                          <span>Stock</span>
+                        </div>
+                        <ul className="max-h-[260px] divide-y divide-border/50 overflow-y-auto rounded-lg bg-background/40 ring-1 ring-foreground/10">
+                          {catalogResults.map((a) => (
+                            <li key={a.id}>
+                              <button
+                                type="button"
+                                onClick={() => setPickedAsset(a)}
+                                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
+                              >
+                                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-muted/60 text-muted-foreground ring-1 ring-foreground/10">
+                                  <Package className="size-4" />
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-[13px] font-medium">
+                                    {a.name}
+                                  </div>
+                                  <div className="truncate text-[11.5px] text-muted-foreground">
+                                    {a.brand || "—"} · {a.category}
+                                  </div>
+                                </div>
+                                <span
+                                  className={cn(
+                                    "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ring-1",
+                                    stockTone(a.status),
+                                  )}
+                                  title={`Stock actual: ${a.stock} · mínimo ${a.threshold}`}
+                                >
+                                  <span className="size-1.5 rounded-full bg-current opacity-80" />
+                                  {a.stock}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="adhoc" className="m-0 outline-none">
+                <div className="grid gap-3.5 sm:grid-cols-2">
+                  <div className="grid gap-1.5 sm:col-span-2">
+                    <Label
+                      htmlFor="adhoc-req-name"
+                      className="!gap-1 text-[12.5px] font-medium text-foreground"
+                    >
+                      <span>
+                        Nombre del item
+                        <span className="ml-0.5 text-status-critical">*</span>
+                      </span>
+                    </Label>
+                    <Input
+                      id="adhoc-req-name"
+                      value={adhocName}
+                      onChange={(e) => setAdhocName(e.target.value)}
+                      placeholder="ej. Adaptador USB-C a HDMI"
+                      className="h-10"
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label
+                      htmlFor="adhoc-req-brand"
+                      className="text-[12.5px] font-medium text-foreground"
+                    >
+                      Marca
+                    </Label>
+                    <Input
+                      id="adhoc-req-brand"
+                      value={adhocBrand}
+                      onChange={(e) => setAdhocBrand(e.target.value)}
+                      placeholder="ej. Anker"
+                      className="h-10"
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label
+                      htmlFor="adhoc-req-cat"
+                      className="text-[12.5px] font-medium text-foreground"
+                    >
+                      Categoría
+                    </Label>
+                    <Input
+                      id="adhoc-req-cat"
+                      value={adhocCategory}
+                      onChange={(e) => setAdhocCategory(e.target.value)}
+                      placeholder="ej. Accesorio"
+                      className="h-10"
+                    />
+                  </div>
+                  <p className="text-[11.5px] text-muted-foreground sm:col-span-2">
+                    Este item se sumará a la próxima compra del mes al aprobar
+                    el pedido.
+                  </p>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        </section>
+
+        {/* Cantidad + Prioridad */}
+        <section className="flex flex-wrap items-start gap-4 sm:flex-nowrap">
+          <div className="flex w-32 shrink-0 flex-col gap-1.5">
+            <Label
+              htmlFor="req-qty"
+              className="!gap-1 text-[12.5px] font-medium text-foreground"
+            >
+              <span>
+                Cantidad
+                <span className="ml-0.5 text-status-critical">*</span>
+              </span>
+            </Label>
+            <NumberInput
+              id="req-qty"
+              min={1}
+              fallback={1}
+              value={qty}
+              onChange={setQty}
+              className="h-10 text-center font-mono tabular-nums"
+            />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Label className="text-[12.5px] font-medium text-foreground">
+              Prioridad
+            </Label>
+            <div className="flex flex-wrap gap-1.5">
+              {PRIORITIES.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriority(p)}
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-[11.5px] font-medium ring-1 transition-colors",
+                    priority === p
+                      ? PRIORITY_TONE[p]
+                      : "bg-muted/40 text-muted-foreground ring-foreground/10 hover:bg-muted/60",
+                  )}
+                >
+                  {PRIORITY_LABEL[p]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-1.5">
+          <Label htmlFor="req-reason" className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+            Motivo <span className="font-normal normal-case tracking-normal text-muted-foreground/70">(opcional)</span>
+          </Label>
+          <textarea
+            id="req-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="ej. Su equipo actual quedó sin stock de un repuesto crítico"
+            rows={2}
+            className="resize-none rounded-md border border-input bg-input/30 px-3 py-2 text-[13px] outline-none transition-colors hover:bg-input/50 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          />
+        </section>
+      </div>
+
+      <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-muted/30 px-5 py-3 sm:px-6">
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button type="button" size="sm" onClick={submit}>
+          {editing ? "Guardar cambios" : "Crear pedido"}
+        </Button>
+      </footer>
+    </>
   );
 }
 
