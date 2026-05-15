@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Asset } from "@/lib/fake-data";
+import { useIsMounted } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
 import {
@@ -79,7 +80,13 @@ export function NotificationsBell({ assets }: { assets: Asset[] }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const { visible, readIds } = useNotifications(assets);
-  const unread = visible.filter((n) => !readIds.has(n.id)).length;
+  const mounted = useIsMounted();
+  // El badge depende del set de read/dismissed que vive en localStorage
+  // (per-device). En SSR no lo conocemos, así que esperamos a hidratar
+  // para evitar el mismatch — render del badge solo client-side.
+  const unread = mounted
+    ? visible.filter((n) => !readIds.has(n.id)).length
+    : 0;
 
   const shown = expanded ? visible : visible.slice(0, PREVIEW_LIMIT);
   const hidden = Math.max(0, visible.length - shown.length);
