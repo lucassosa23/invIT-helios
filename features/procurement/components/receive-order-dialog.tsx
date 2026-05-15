@@ -17,10 +17,10 @@ import { cn } from "@/lib/utils";
 
 import {
   pendingPerLine,
-  receiveOrderShipment,
   totalPending,
   type PurchaseOrder,
 } from "../lib/orders";
+import { receiveOrderShipmentAction } from "../lib/actions";
 import { cascadeRequestsOnOrderReceived } from "@/features/requests/lib/requests";
 
 type Props = {
@@ -89,7 +89,7 @@ function ReceiveOrderBody({
     setDraft(next);
   };
 
-  const confirm = () => {
+  const confirm = async () => {
     if (totalNow <= 0) {
       toast.error("Marcá al menos un item recibido");
       return;
@@ -97,22 +97,27 @@ function ReceiveOrderBody({
     const shipments = Object.entries(draft)
       .filter(([, q]) => q > 0)
       .map(([lineId, qty]) => ({ lineId, qty }));
-    const res = receiveOrderShipment(order.id, shipments);
-    if ("ok" in res) {
-      toast.error("No se pudo recibir", { description: res.reason });
-      return;
+    try {
+      const res = await receiveOrderShipmentAction(order.id, shipments);
+      if (!res.ok) {
+        toast.error("No se pudo recibir", { description: res.reason });
+        return;
+      }
+      const flipped = cascadeRequestsOnOrderReceived(order.id);
+      if (res.newStatus === "received") {
+        toast.success("Orden recibida · completa", {
+          description: `+${res.totalAdded} ${res.totalAdded === 1 ? "unidad" : "unidades"} al stock${flipped > 0 ? ` · ${flipped} pedido${flipped === 1 ? "" : "s"} listo${flipped === 1 ? "" : "s"} para entregar` : ""}`,
+        });
+      } else {
+        toast.success("Recepción parcial registrada", {
+          description: `+${res.totalAdded} al stock · falta recibir ${totalPendingQty - totalNow}${flipped > 0 ? ` · ${flipped} pedido${flipped === 1 ? "" : "s"} listo${flipped === 1 ? "" : "s"}` : ""}`,
+        });
+      }
+      onClose();
+    } catch (err) {
+      console.error(err);
+      toast.error("Falló la recepción");
     }
-    const flipped = cascadeRequestsOnOrderReceived(order.id);
-    if (res.newStatus === "received") {
-      toast.success("Orden recibida · completa", {
-        description: `+${res.totalAdded} ${res.totalAdded === 1 ? "unidad" : "unidades"} al stock${flipped > 0 ? ` · ${flipped} pedido${flipped === 1 ? "" : "s"} listo${flipped === 1 ? "" : "s"} para entregar` : ""}`,
-      });
-    } else {
-      toast.success("Recepción parcial registrada", {
-        description: `+${res.totalAdded} al stock · falta recibir ${totalPendingQty - totalNow}${flipped > 0 ? ` · ${flipped} pedido${flipped === 1 ? "" : "s"} listo${flipped === 1 ? "" : "s"}` : ""}`,
-      });
-    }
-    onClose();
   };
 
   return (

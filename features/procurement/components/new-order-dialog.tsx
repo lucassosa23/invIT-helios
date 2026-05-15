@@ -35,14 +35,16 @@ import type { Asset } from "@/lib/fake-data";
 import { useInventory } from "@/lib/hooks";
 
 import {
-  createEmptyOrder,
   isMonthlyPlan,
   loadOrders,
-  saveOrders,
   type OrderLine,
   type PurchaseOrder,
   type PurchaseOrderStatus,
 } from "../lib/orders";
+import {
+  createOrderAction,
+  updateOrderAction,
+} from "../lib/actions";
 import {
   syncOrderRequestLinks,
   loadRequests,
@@ -337,12 +339,11 @@ function NewOrderBody({
 
   const editingMonthlyPlan = editing ? isMonthlyPlan(editing) : false;
 
-  const persist = (status: PurchaseOrderStatus) => {
+  const persist = async (status: PurchaseOrderStatus) => {
     if (lines.length === 0) {
       toast.error("Agregá al menos un item antes de guardar");
       return;
     }
-    const existing = loadOrders();
     const selectedRequestIds = Array.from(linkedRequestIds);
     let savedOrderId: string;
 
@@ -368,38 +369,44 @@ function NewOrderBody({
       }
     }
 
-    if (editing) {
-      savedOrderId = editing.id;
-      const next = existing.map((o) =>
-        o.id === editing.id
-          ? {
-              ...o,
-              lines,
-              note: note.trim(),
-              status,
-              updatedAt: new Date(),
-            }
-          : o,
-      );
-      saveOrders(next);
-      toast.success("Orden actualizada", {
-        description: `${editing.reference} · ${lines.length} items`,
-      });
-    } else {
-      const draft = createEmptyOrder(existing);
-      const order: PurchaseOrder = {
-        ...draft,
-        status,
-        lines,
-        note: note.trim(),
-        updatedAt: new Date(),
-      };
-      savedOrderId = order.id;
-      saveOrders([order, ...existing]);
-      toast.success(
-        status === "ready" ? "Orden lista para enviar" : "Borrador guardado",
-        { description: `${order.reference} · ${lines.length} items` },
-      );
+    const lineInputs = lines.map((l) => ({
+      assetId: l.assetId ?? null,
+      name: l.name,
+      brand: l.brand,
+      category: l.category,
+      isNew: l.isNew,
+      qty: l.qty,
+    }));
+
+    try {
+      if (editing) {
+        savedOrderId = editing.id;
+        await updateOrderAction(editing.id, {
+          lines: lineInputs,
+          note: note.trim(),
+          status,
+          monthYear: null,
+        });
+        toast.success("Orden actualizada", {
+          description: `${editing.reference} · ${lines.length} items`,
+        });
+      } else {
+        const created = await createOrderAction({
+          lines: lineInputs,
+          note: note.trim(),
+          status,
+          monthYear: null,
+        });
+        savedOrderId = created.id;
+        toast.success(
+          status === "ready" ? "Orden lista para enviar" : "Borrador guardado",
+          { description: `${created.reference} · ${lines.length} items` },
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo guardar la orden");
+      return;
     }
 
     const { linked, unlinked } = syncOrderRequestLinks(

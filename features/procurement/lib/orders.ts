@@ -1,12 +1,15 @@
 "use client";
 
-import { statusFromStock, type Asset } from "@/lib/fake-data";
-import { loadInventory, saveInventory } from "@/lib/storage";
+// NOTA: este módulo está en transición. La fuente de verdad para
+// orders es la DB (ver features/procurement/lib/queries.ts y actions.ts).
+// Las funciones load/save/subscribe quedan acá como compat para
+// monthly-plan.ts y otros consumers que se migran en commits siguientes.
+// Un <OrdersHydrator> sincroniza localStorage con la DB en cada
+// navegación así no se ven datos viejos.
 
 /**
  * Reconoce si una orden es el plan de compras del mes (referencia tipo
- * PO-PLAN-YYYY-MM). Helper duplicado acá para evitar dependencias
- * circulares con monthly-plan.ts.
+ * PO-PLAN-YYYY-MM).
  */
 export function isMonthlyPlan(order: { reference: string }): boolean {
   return /^PO-PLAN-\d{4}-\d{2}$/.test(order.reference);
@@ -28,7 +31,7 @@ export type OrderLine = {
   category: string;
   isNew: boolean;
   qty: number;
-  receivedQty?: number; // suma acumulada de lo recibido en entregas parciales
+  receivedQty?: number;
 };
 
 export type PurchaseOrder = {
@@ -42,6 +45,11 @@ export type PurchaseOrder = {
   orderedAt?: Date;
   receivedAt?: Date;
 };
+
+// ============================================================
+// Compat localStorage — TRANSITORIO
+// monthly-plan.ts todavía lee/escribe acá. Lo migra el próximo commit.
+// ============================================================
 
 const KEY_ORDERS = "invit:orders:v1";
 
@@ -98,6 +106,10 @@ export function subscribeOrders(cb: () => void): () => void {
   };
 }
 
+// ============================================================
+// Helpers puros
+// ============================================================
+
 export function nextOrderRef(existing: PurchaseOrder[]): string {
   const max = existing
     .map((o) => {
@@ -125,12 +137,6 @@ export function totalQty(order: PurchaseOrder): number {
   return order.lines.reduce((s, l) => s + l.qty, 0);
 }
 
-export type ApplyResult = {
-  updated: number;
-  created: number;
-};
-
-/** Cantidades que faltan por recibir por línea. */
 export function pendingPerLine(order: PurchaseOrder): Map<string, number> {
   const m = new Map<string, number>();
   for (const l of order.lines) {
@@ -151,7 +157,6 @@ export function totalPending(order: PurchaseOrder): number {
   );
 }
 
-/** Determina el status según el avance de las líneas. */
 export function deriveStatusAfterReceive(
   order: PurchaseOrder,
 ): PurchaseOrderStatus {
@@ -166,144 +171,8 @@ export function deriveStatusAfterReceive(
 
 export type Shipment = {
   lineId: string;
-  qty: number; // cantidad recibida en esta entrega (>= 0)
+  qty: number;
 };
-
-export type ShipmentResult = {
-  updated: number; // assets existentes actualizados
-  created: number; // assets nuevos creados desde líneas isNew
-  newStatus: PurchaseOrderStatus;
-  updatedOrder: PurchaseOrder;
-  totalAdded: number; // suma de unidades agregadas al inventario
-};
-
-/**
- * Aplica una entrega parcial (o completa) al inventario y actualiza la orden.
- * `shipments` es un array con cuánto se recibe AHORA por línea (no acumulado).
- * Para una recepción completa de una sola vez: shipments = todas las pendientes.
- *
- * Maneja:
- *   - Líneas existentes (con assetId): suma stock al asset.
- *   - Líneas nuevas (isNew): crea el asset en la primera entrega, después solo
- *     suma. El assetId creado se persiste en la línea para entregas futuras.
- *   - Cierre automático del status: si todo se recibió → "received", sino
- *     queda en "received_partial".
- */
-export function receiveOrderShipment(
-  orderId: string,
-  shipments: Shipment[],
-): ShipmentResult | { ok: false; reason: string } {
-  const orders = loadOrders();
-  const idx = orders.findIndex((o) => o.id === orderId);
-  if (idx < 0) return { ok: false, reason: "Orden no encontrada." };
-  const order = orders[idx];
-
-  if (order.status !== "ordered" && order.status !== "received_partial") {
-    return {
-      ok: false,
-      reason: "Solo se pueden recibir órdenes en estado Enviada o parcial.",
-    };
-  }
-
-  const inventory = loadInventory() ?? [];
-  const byAssetId = new Map(inventory.map((a) => [a.id, a]));
-  const now = new Date();
-
-  let updated = 0;
-  let created = 0;
-  let totalAdded = 0;
-
-  // Mapeo de lineId → shipment
-  const shipmentByLine = new Map<string, number>();
-  for (const s of shipments) {
-    if (s.qty > 0) shipmentByLine.set(s.lineId, s.qty);
-  }
-  if (shipmentByLine.size === 0) {
-    return { ok: false, reason: "No marcaste cantidad recibida en ninguna línea." };
-  }
-
-  const nextLines: OrderLine[] = order.lines.map((line) => {
-    const incoming = shipmentByLine.get(line.id) ?? 0;
-    if (incoming <= 0) return line;
-
-    let resolvedAssetId = line.assetId;
-
-    if (resolvedAssetId && byAssetId.has(resolvedAssetId)) {
-      const a = byAssetId.get(resolvedAssetId)!;
-      const newStock = a.stock + incoming;
-      byAssetId.set(a.id, {
-        ...a,
-        stock: newStock,
-        status: statusFromStock(newStock, a.threshold),
-        updatedAt: now,
-      });
-      updated++;
-    } else {
-      // Primera entrega de una línea isNew: crear asset
-      const id = `ast_po_${now.getTime().toString(36)}_${created}_${Math.random().toString(36).slice(2, 5)}`;
-      const sku = `${(line.category.slice(0, 3) || "GEN").toUpperCase()}-${(
-        line.brand.slice(0, 3) || "BRD"
-      ).toUpperCase()}-${id.slice(-4).toUpperCase()}`;
-      const threshold = Math.max(1, Math.ceil(line.qty * 0.3));
-      const asset: Asset = {
-        id,
-        sku,
-        name: line.name,
-        brand: line.brand,
-        category: line.category || "Otros",
-        stock: incoming,
-        threshold,
-        unitCost: 0,
-        locationId: inventory[0]?.locationId ?? "",
-        vendorId: "",
-        warrantyExpiresAt: new Date(0),
-        status: statusFromStock(incoming, threshold),
-        updatedAt: now,
-      };
-      byAssetId.set(id, asset);
-      resolvedAssetId = id;
-      created++;
-    }
-
-    totalAdded += incoming;
-    return {
-      ...line,
-      assetId: resolvedAssetId,
-      receivedQty: (line.receivedQty ?? 0) + incoming,
-    };
-  });
-
-  saveInventory(Array.from(byAssetId.values()));
-
-  const orderInProgress: PurchaseOrder = {
-    ...order,
-    lines: nextLines,
-    updatedAt: now,
-  };
-  const newStatus = deriveStatusAfterReceive(orderInProgress);
-  const updatedOrder: PurchaseOrder = {
-    ...orderInProgress,
-    status: newStatus,
-    receivedAt: newStatus === "received" ? now : order.receivedAt,
-  };
-
-  const nextOrders = orders.slice();
-  nextOrders[idx] = updatedOrder;
-  saveOrders(nextOrders);
-
-  return { updated, created, newStatus, updatedOrder, totalAdded };
-}
-
-/** Compat: recibe la orden completa de una sola vez (legacy). */
-export function applyOrderToInventory(order: PurchaseOrder): ApplyResult {
-  const shipments: Shipment[] = order.lines.map((l) => ({
-    lineId: l.id,
-    qty: Math.max(0, l.qty - (l.receivedQty ?? 0)),
-  }));
-  const res = receiveOrderShipment(order.id, shipments);
-  if ("ok" in res) return { updated: 0, created: 0 };
-  return { updated: res.updated, created: res.created };
-}
 
 const STATUS_FLOW: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
   draft: ["ready", "ordered", "cancelled"],

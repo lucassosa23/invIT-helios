@@ -5,15 +5,17 @@ import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
-import { useOrders } from "../lib/use-orders";
 import { isMonthlyPlan, type PurchaseOrder } from "../lib/orders";
 import { NewOrderDialog } from "./new-order-dialog";
 import { OrdersList } from "./orders-list";
 import { OrderSummaryCards } from "./order-summary-cards";
 import { MonthlyPlanCard } from "./monthly-plan-card";
 
-export function ProcurementShell() {
-  const { orders, hydrated } = useOrders();
+type Props = {
+  orders: PurchaseOrder[];
+};
+
+export function ProcurementShell({ orders }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
 
@@ -28,10 +30,8 @@ export function ProcurementShell() {
   };
 
   // /procurement = solo fase de planificación: drafts + listas para enviar.
-  // Las órdenes ya enviadas (ordered/received_partial/received) viven en
-  // /requests bajo "Nuestras compras". El plan del mes se muestra en su
-  // card propio, separado de la lista general. Las canceladas no aparecen
-  // (la app no usa "cancelar" — se elimina directo).
+  // Las órdenes enviadas (ordered/partial/received) viven en
+  // /requests bajo "Nuestras compras". El plan del mes va aparte.
   const planningOrders = useMemo(
     () =>
       orders.filter(
@@ -57,7 +57,7 @@ export function ProcurementShell() {
 
       <OrdersList
         orders={planningOrders}
-        hydrated={hydrated}
+        hydrated
         onEdit={openEdit}
         onCreate={openCreate}
       />

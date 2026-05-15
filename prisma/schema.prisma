@@ -251,6 +251,8 @@ model PurchaseOrder {
   monthYear String?             @map("month_year")
   createdAt DateTime            @default(now()) @map("created_at")
   updatedAt DateTime            @updatedAt @map("updated_at")
+  orderedAt DateTime?           @map("ordered_at")
+  receivedAt DateTime?          @map("received_at")
 
   lines    OrderLine[]
   requests InternalRequest[]

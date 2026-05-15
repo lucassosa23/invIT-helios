@@ -19,8 +19,6 @@ import { cn } from "@/lib/utils";
 import { formatRelative } from "@/lib/format";
 import {
   canTransition,
-  loadOrders,
-  saveOrders,
   STATUS_LABEL,
   STATUS_TONE,
   totalPending,
@@ -29,6 +27,11 @@ import {
   type PurchaseOrder,
   type PurchaseOrderStatus,
 } from "../lib/orders";
+import {
+  createOrderAction,
+  deleteOrderAction,
+  transitionOrderStatusAction,
+} from "../lib/actions";
 import {
   cascadeRequestsOnOrderCancelled,
 } from "@/features/requests/lib/requests";
@@ -129,50 +132,64 @@ function OrderCard({
 
   const [receiveOpen, setReceiveOpen] = useState(false);
 
-  const updateStatus = (next: PurchaseOrderStatus) => {
+  const updateStatus = async (next: PurchaseOrderStatus) => {
     if (!canTransition(order.status, next)) return;
-    const existing = loadOrders();
-    const now = new Date();
-
-    // "received" no se setea desde acá — siempre por el dialog de recepción.
+    // "received" / "received_partial" salen siempre del dialog de recepción.
     if (next === "received" || next === "received_partial") return;
 
-    const updatedOrders = existing.map((o) =>
-      o.id === order.id
-        ? {
-            ...o,
-            status: next,
-            updatedAt: now,
-            orderedAt: next === "ordered" ? now : o.orderedAt,
-          }
-        : o,
-    );
-    saveOrders(updatedOrders);
-    if (next === "cancelled") {
-      const reverted = cascadeRequestsOnOrderCancelled(order.id);
-      if (reverted > 0) {
-        toast.warning(
-          `${reverted} pedido${reverted === 1 ? "" : "s"} volvieron a pendiente`,
-          { description: "La orden vinculada fue cancelada." },
-        );
+    try {
+      await transitionOrderStatusAction(order.id, next);
+      if (next === "cancelled") {
+        const reverted = cascadeRequestsOnOrderCancelled(order.id);
+        if (reverted > 0) {
+          toast.warning(
+            `${reverted} pedido${reverted === 1 ? "" : "s"} volvieron a pendiente`,
+            { description: "La orden vinculada fue cancelada." },
+          );
+        }
       }
+      toast.success(`Orden ${STATUS_LABEL[next].toLowerCase()}`, {
+        description: order.reference,
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo cambiar el estado");
     }
-    toast.success(`Orden ${STATUS_LABEL[next].toLowerCase()}`, {
-      description: order.reference,
-    });
   };
 
-  const handleDelete = () => {
-    const existing = loadOrders();
-    const next = existing.filter((o) => o.id !== order.id);
-    saveOrders(next);
-    cascadeRequestsOnOrderCancelled(order.id);
-    toast(`${order.reference} eliminada`, {
-      action: {
-        label: "Deshacer",
-        onClick: () => saveOrders([order, ...next]),
-      },
-    });
+  const handleDelete = async () => {
+    try {
+      await deleteOrderAction(order.id);
+      cascadeRequestsOnOrderCancelled(order.id);
+      toast(`${order.reference} eliminada`, {
+        action: {
+          label: "Deshacer",
+          onClick: async () => {
+            try {
+              await createOrderAction({
+                lines: order.lines.map((l) => ({
+                  assetId: l.assetId ?? null,
+                  name: l.name,
+                  brand: l.brand,
+                  category: l.category,
+                  isNew: l.isNew,
+                  qty: l.qty,
+                })),
+                note: order.note ?? "",
+                status: order.status,
+                monthYear: null,
+              });
+            } catch (err) {
+              console.error(err);
+              toast.error("No se pudo restaurar");
+            }
+          },
+        },
+      });
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo eliminar la orden");
+    }
   };
 
   return (
