@@ -1,11 +1,9 @@
-"use client";
-
-// NOTA: este módulo está en transición. La fuente de verdad para
-// orders es la DB (ver features/procurement/lib/queries.ts y actions.ts).
-// Las funciones load/save/subscribe quedan acá como compat para
-// monthly-plan.ts y otros consumers que se migran en commits siguientes.
-// Un <OrdersHydrator> sincroniza localStorage con la DB en cada
-// navegación así no se ven datos viejos.
+// Tipos + helpers puros de procurement. Sin "use client" — los consume
+// también el lado server (Server Actions, queries).
+//
+// Las funciones de localStorage (loadOrders / saveOrders / subscribeOrders)
+// viven en `orders-storage.ts` (transitorias, hasta que el resto de la
+// app lea directo de la DB).
 
 /**
  * Reconoce si una orden es el plan de compras del mes (referencia tipo
@@ -25,7 +23,7 @@ export type PurchaseOrderStatus =
 
 export type OrderLine = {
   id: string;
-  assetId?: string; // referencia al asset si existe; vacío = ítem nuevo
+  assetId?: string;
   name: string;
   brand: string;
   category: string;
@@ -45,70 +43,6 @@ export type PurchaseOrder = {
   orderedAt?: Date;
   receivedAt?: Date;
 };
-
-// ============================================================
-// Compat localStorage — TRANSITORIO
-// monthly-plan.ts todavía lee/escribe acá. Lo migra el próximo commit.
-// ============================================================
-
-const KEY_ORDERS = "invit:orders:v1";
-
-type StoredOrder = Omit<
-  PurchaseOrder,
-  "createdAt" | "updatedAt" | "orderedAt" | "receivedAt"
-> & {
-  createdAt: string;
-  updatedAt: string;
-  orderedAt?: string;
-  receivedAt?: string;
-};
-
-function isBrowser() {
-  return typeof window !== "undefined" && typeof localStorage !== "undefined";
-}
-
-export function loadOrders(): PurchaseOrder[] {
-  if (!isBrowser()) return [];
-  try {
-    const raw = localStorage.getItem(KEY_ORDERS);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as StoredOrder[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((o) => ({
-      ...o,
-      createdAt: new Date(o.createdAt),
-      updatedAt: new Date(o.updatedAt),
-      orderedAt: o.orderedAt ? new Date(o.orderedAt) : undefined,
-      receivedAt: o.receivedAt ? new Date(o.receivedAt) : undefined,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-export function saveOrders(orders: PurchaseOrder[]) {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(KEY_ORDERS, JSON.stringify(orders));
-    window.dispatchEvent(new Event("invit:orders-changed"));
-  } catch {
-    /* ignore quota errors */
-  }
-}
-
-export function subscribeOrders(cb: () => void): () => void {
-  if (!isBrowser()) return () => {};
-  window.addEventListener("invit:orders-changed", cb);
-  window.addEventListener("storage", cb);
-  return () => {
-    window.removeEventListener("invit:orders-changed", cb);
-    window.removeEventListener("storage", cb);
-  };
-}
-
-// ============================================================
-// Helpers puros
-// ============================================================
 
 export function nextOrderRef(existing: PurchaseOrder[]): string {
   const max = existing

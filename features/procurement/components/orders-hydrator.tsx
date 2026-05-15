@@ -2,7 +2,8 @@
 
 import { useEffect } from "react";
 
-import { saveOrders, type PurchaseOrder } from "../lib/orders";
+import type { PurchaseOrder } from "../lib/orders";
+import { saveOrders } from "../lib/orders-storage";
 
 /** Shim transitorio: sincroniza localStorage de orders con la DB en
  *  cada navegación. monthly-plan.ts, our-purchases-section y otros

@@ -2,11 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import {
-  loadOrders,
-  subscribeOrders,
-  type PurchaseOrder,
-} from "./orders";
+import type { PurchaseOrder } from "./orders";
+import { loadOrders, subscribeOrders } from "./orders-storage";
 
 export function useOrders(): {
   orders: PurchaseOrder[];

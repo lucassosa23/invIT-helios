@@ -36,11 +36,11 @@ import { useInventory } from "@/lib/hooks";
 
 import {
   isMonthlyPlan,
-  loadOrders,
   type OrderLine,
   type PurchaseOrder,
   type PurchaseOrderStatus,
 } from "../lib/orders";
+import { loadOrders } from "../lib/orders-storage";
 import {
   createOrderAction,
   updateOrderAction,

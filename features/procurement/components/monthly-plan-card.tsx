@@ -27,11 +27,8 @@ import {
   subscribeDismissed,
   type AssetInOrder,
 } from "../lib/monthly-plan";
-import {
-  STATUS_LABEL,
-  subscribeOrders,
-  type PurchaseOrder,
-} from "../lib/orders";
+import { STATUS_LABEL, type PurchaseOrder } from "../lib/orders";
+import { subscribeOrders } from "../lib/orders-storage";
 
 type Props = {
   orders: PurchaseOrder[];

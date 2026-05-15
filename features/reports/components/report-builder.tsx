@@ -15,10 +15,12 @@ import {
 import { loadInventory, subscribeInventory } from "@/lib/storage";
 import {
   isMonthlyPlan,
-  loadOrders,
-  subscribeOrders,
   type PurchaseOrder,
 } from "@/features/procurement/lib/orders";
+import {
+  loadOrders,
+  subscribeOrders,
+} from "@/features/procurement/lib/orders-storage";
 import {
   loadRequests,
   subscribeRequests,

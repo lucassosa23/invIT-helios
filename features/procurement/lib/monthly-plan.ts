@@ -3,12 +3,11 @@
 import { statusFromStock, type Asset, type Status } from "@/lib/fake-data";
 import { loadInventory } from "@/lib/storage";
 
-import {
-  loadOrders,
-  saveOrders,
-  type OrderLine,
-  type PurchaseOrder,
-  type PurchaseOrderStatus,
+import { loadOrders, saveOrders } from "./orders-storage";
+import type {
+  OrderLine,
+  PurchaseOrder,
+  PurchaseOrderStatus,
 } from "./orders";
 
 /**

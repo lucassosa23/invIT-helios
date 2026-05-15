@@ -31,11 +31,11 @@ import { flatNav } from "@/lib/navigation";
 import { SETTINGS_SECTIONS } from "@/features/settings/lib/sections";
 import { loadInventory, subscribeInventory } from "@/lib/storage";
 import type { Asset } from "@/lib/fake-data";
+import type { PurchaseOrder } from "@/features/procurement/lib/orders";
 import {
   loadOrders,
   subscribeOrders,
-  type PurchaseOrder,
-} from "@/features/procurement/lib/orders";
+} from "@/features/procurement/lib/orders-storage";
 import {
   loadRequests,
   subscribeRequests,

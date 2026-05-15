@@ -30,11 +30,11 @@ import { useTheme } from "next-themes";
 import { flatNav } from "@/lib/navigation";
 import { loadInventory, subscribeInventory } from "@/lib/storage";
 import type { Asset } from "@/lib/fake-data";
+import type { PurchaseOrder } from "@/features/procurement/lib/orders";
 import {
   loadOrders,
   subscribeOrders,
-  type PurchaseOrder,
-} from "@/features/procurement/lib/orders";
+} from "@/features/procurement/lib/orders-storage";
 import {
   loadRequests,
   subscribeRequests,

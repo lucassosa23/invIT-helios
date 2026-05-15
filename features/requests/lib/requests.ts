@@ -5,8 +5,10 @@ import { loadInventory, saveInventory } from "@/lib/storage";
 import {
   loadOrders,
   saveOrders,
-  type OrderLine,
-  type PurchaseOrder,
+} from "@/features/procurement/lib/orders-storage";
+import type {
+  OrderLine,
+  PurchaseOrder,
 } from "@/features/procurement/lib/orders";
 import { getOrCreateMonthlyPlan } from "@/features/procurement/lib/monthly-plan";
 
