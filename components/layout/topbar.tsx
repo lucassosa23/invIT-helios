@@ -6,8 +6,11 @@ import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 import { Button } from "@/components/ui/button";
 import { NotificationsBell } from "@/features/notifications/components/notifications-bell";
+import { getCurrentUser } from "@/lib/auth/current-user";
 
-export function Topbar() {
+export async function Topbar() {
+  const user = await getCurrentUser();
+
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border/70 bg-background/70 px-4 backdrop-blur supports-backdrop-filter:bg-background/60">
       <Button
@@ -31,7 +34,13 @@ export function Topbar() {
         <NotificationsBell />
         <ThemeToggle />
         <div className="mx-1 h-5 w-px bg-border" />
-        <UserMenu />
+        {user ? (
+          <UserMenu name={user.name} email={user.email} />
+        ) : (
+          // Safety net: si por algún motivo el middleware no atrapó la
+          // ruta y llegamos acá sin user, no rompemos el render.
+          <UserMenu name="Invitado" email="" />
+        )}
       </div>
     </header>
   );

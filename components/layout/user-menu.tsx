@@ -1,13 +1,7 @@
 "use client";
 
-import {
-  Bell,
-  ChevronDown,
-  LifeBuoy,
-  LogOut,
-  Settings,
-  Sparkles,
-} from "lucide-react";
+import { useTransition } from "react";
+import { Bell, ChevronDown, LifeBuoy, LogOut, Settings, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -19,8 +13,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { signOutAction } from "@/lib/auth/actions";
+import { initials } from "@/lib/format";
 
-export function UserMenu() {
+export type UserMenuProps = {
+  name: string;
+  email: string;
+};
+
+export function UserMenu({ name, email }: UserMenuProps) {
+  const [pending, startTransition] = useTransition();
+
+  const handleSignOut = () => {
+    startTransition(async () => {
+      await signOutAction();
+    });
+  };
+
+  const userInitials = initials(name);
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -31,7 +42,7 @@ export function UserMenu() {
             className="group flex h-8 items-center gap-1.5 rounded-md pr-1.5 pl-0.5 transition-colors hover:bg-muted/60"
           >
             <div className="grid size-7 place-items-center rounded-full bg-gradient-to-br from-primary/40 to-primary/10 text-[11.5px] font-semibold text-primary-foreground ring-1 ring-primary/30">
-              LS
+              {userInitials}
             </div>
             <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-aria-expanded:rotate-180" />
           </button>
@@ -40,12 +51,12 @@ export function UserMenu() {
       <DropdownMenuContent align="end" sideOffset={8} className="w-60 p-1.5">
         <div className="flex items-center gap-2.5 px-2 pt-1 pb-2">
           <div className="grid size-9 place-items-center rounded-full bg-gradient-to-br from-primary/50 to-primary/10 text-sm font-semibold text-primary-foreground ring-1 ring-primary/30">
-            LS
+            {userInitials}
           </div>
           <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-sm font-medium">Lucas Sosa</div>
+            <div className="truncate text-sm font-medium">{name}</div>
             <div className="truncate text-xs text-muted-foreground">
-              sistemas@heliossalud.com.ar
+              {email}
             </div>
           </div>
         </div>
@@ -70,9 +81,13 @@ export function UserMenu() {
           <LifeBuoy className="text-muted-foreground" />
           Ayuda y soporte
         </DropdownMenuItem>
-        <DropdownMenuItem variant="destructive">
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={pending}
+          onClick={handleSignOut}
+        >
           <LogOut />
-          Cerrar sesión
+          {pending ? "Cerrando…" : "Cerrar sesión"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

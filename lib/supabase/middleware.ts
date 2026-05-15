@@ -1,10 +1,27 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-/** Refresca la sesión de Supabase en cada request. Llamalo desde
- *  `middleware.ts` (en la raíz) para que las cookies de auth se
- *  mantengan vivas y los Server Components/Actions ya tengan
- *  acceso al usuario. */
+// Rutas que NO requieren sesión (todo lo demás sí).
+const PUBLIC_ROUTES = new Set<string>([
+  "/",
+  "/login",
+  "/signup",
+]);
+
+// Prefijos públicos (la ruta entera empieza con esto).
+const PUBLIC_PREFIXES = ["/api/auth"];
+
+function isPublicPath(pathname: string): boolean {
+  if (PUBLIC_ROUTES.has(pathname)) return true;
+  for (const prefix of PUBLIC_PREFIXES) {
+    if (pathname.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/** Refresca la sesión Supabase Y aplica el auth-gate.
+ *  Si el usuario no está autenticado y la ruta lo requiere, redirige a /login.
+ *  Si está autenticado e intenta entrar a /login, redirige a /dashboard. */
 export async function updateSupabaseSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -29,8 +46,32 @@ export async function updateSupabaseSession(request: NextRequest) {
     },
   );
 
-  // El call a getUser() es lo que dispara la refresca interna de Supabase.
-  await supabase.auth.getUser();
+  // getUser() dispara la refresca interna de cookies.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const pathname = request.nextUrl.pathname;
+  const isPublic = isPublicPath(pathname);
+  const isLogin = pathname === "/login";
+
+  // Sin sesión y ruta privada → /login con ?redirect= original.
+  // Reseteamos la query original para no mezclarla con `redirect`.
+  if (!user && !isPublic) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.search = "";
+    loginUrl.searchParams.set("redirect", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // Con sesión y entrando a /login → /dashboard
+  if (user && isLogin) {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+    dashboardUrl.search = "";
+    return NextResponse.redirect(dashboardUrl);
+  }
 
   return response;
 }
