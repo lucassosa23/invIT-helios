@@ -9,7 +9,9 @@ import {
   Bell,
   BellOff,
   CheckCheck,
+  ChevronDown,
   PackageX,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,12 +24,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 import {
+  dismissAll,
   markAllRead,
   markRead,
   type NotifKind,
   type StockNotif,
 } from "../lib/notifications";
 import { useNotifications } from "../lib/use-notifications";
+
+const PREVIEW_LIMIT = 5;
 
 const KIND_META: Record<
   NotifKind,
@@ -71,16 +76,33 @@ function buildHref(notif: StockNotif): string {
 
 export function NotificationsBell() {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const { visible, readIds } = useNotifications();
   const unread = visible.filter((n) => !readIds.has(n.id)).length;
+
+  const shown = expanded ? visible : visible.slice(0, PREVIEW_LIMIT);
+  const hidden = Math.max(0, visible.length - shown.length);
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    // Resetear paginación al cerrar para que la próxima apertura
+    // vuelva a mostrar solo el preview corto.
+    if (!next) setExpanded(false);
+  };
 
   const handleItemClick = (id: string) => {
     markRead([id]);
     setOpen(false);
+    setExpanded(false);
+  };
+
+  const handleClearAll = () => {
+    dismissAll();
+    setExpanded(false);
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         render={
           <button
@@ -122,17 +144,32 @@ export function NotificationsBell() {
                   }`}
             </span>
           </div>
-          {unread > 0 && (
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost"
-              onClick={() => markAllRead()}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <CheckCheck className="size-3.5" />
-              Marcar leídas
-            </Button>
+          {visible.length > 0 && (
+            <div className="flex shrink-0 items-center gap-0.5">
+              {unread > 0 && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => markAllRead()}
+                  className="text-muted-foreground hover:text-foreground"
+                  title="Marcar todas como leídas"
+                >
+                  <CheckCheck className="size-3.5" />
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={handleClearAll}
+                className="text-muted-foreground hover:text-status-critical"
+                title="Limpiar todas"
+              >
+                <Trash2 className="size-3.5" />
+                Limpiar
+              </Button>
+            </div>
           )}
         </header>
 
@@ -152,7 +189,7 @@ export function NotificationsBell() {
         ) : (
           <ScrollArea className="max-h-[420px]">
             <ul className="divide-y divide-border/50">
-              {visible.map((n) => {
+              {shown.map((n) => {
                 const meta = KIND_META[n.kind];
                 const Icon = meta.icon;
                 const isRead = readIds.has(n.id);
@@ -222,6 +259,16 @@ export function NotificationsBell() {
                 );
               })}
             </ul>
+            {hidden > 0 && (
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                className="flex w-full items-center justify-center gap-1.5 border-t border-border/50 px-4 py-2.5 text-[11.5px] font-semibold text-primary transition-colors hover:bg-muted/40"
+              >
+                <ChevronDown className="size-3.5" />
+                Ver {hidden} más
+              </button>
+            )}
           </ScrollArea>
         )}
 
