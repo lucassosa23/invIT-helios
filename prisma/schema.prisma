@@ -297,25 +297,31 @@ enum RequestStatus {
   AWAITING_PURCHASE
   READY_TO_DELIVER
   DELIVERED
+  REJECTED
+  // CANCELLED queda por compat de DB; la app usa REJECTED.
   CANCELLED
 }
 
 model InternalRequest {
-  id            String        @id @default(cuid())
-  reference     String        @unique
-  requesterName String        @map("requester_name")
-  requesterTeam String        @map("requester_team")
-  itemName      String        @map("item_name")
-  assetId       String?       @map("asset_id")
-  brand         String
-  category      String
-  qty           Int
-  priority      Priority      @default(MEDIUM)
-  reason        String        @default("")
-  status        RequestStatus @default(PENDING)
-  linkedOrderId String?       @map("linked_order_id")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  id              String        @id @default(cuid())
+  reference       String        @unique
+  requesterName   String        @map("requester_name")
+  requesterTeam   String        @map("requester_team")
+  itemName        String        @map("item_name")
+  assetId         String?       @map("asset_id")
+  brand           String
+  category        String
+  qty             Int
+  priority        Priority      @default(MEDIUM)
+  reason          String        @default("")
+  status          RequestStatus @default(PENDING)
+  linkedOrderId   String?       @map("linked_order_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  approvedAt      DateTime?     @map("approved_at")
+  deliveredAt     DateTime?     @map("delivered_at")
+  rejectedAt      DateTime?     @map("rejected_at")
+  rejectionReason String?       @map("rejection_reason")
 
   asset       Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
   linkedOrder PurchaseOrder? @relation(fields: [linkedOrderId], references: [id], onDelete: SetNull)

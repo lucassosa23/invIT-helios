@@ -21,7 +21,6 @@ import {
   type PurchaseOrder,
 } from "../lib/orders";
 import { receiveOrderShipmentAction } from "../lib/actions";
-import { cascadeRequestsOnOrderReceived } from "@/features/requests/lib/requests";
 
 type Props = {
   order: PurchaseOrder | null;
@@ -103,7 +102,7 @@ function ReceiveOrderBody({
         toast.error("No se pudo recibir", { description: res.reason });
         return;
       }
-      const flipped = cascadeRequestsOnOrderReceived(order.id);
+      const flipped = res.requestsFlipped;
       if (res.newStatus === "received") {
         toast.success("Orden recibida · completa", {
           description: `+${res.totalAdded} ${res.totalAdded === 1 ? "unidad" : "unidades"} al stock${flipped > 0 ? ` · ${flipped} pedido${flipped === 1 ? "" : "s"} listo${flipped === 1 ? "" : "s"} para entregar` : ""}`,

@@ -2,12 +2,15 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/page-header";
 import { RequestsShell } from "@/features/requests/components/requests-shell";
+import { getRequests } from "@/features/requests/lib/queries";
 
 export const metadata: Metadata = {
   title: "Pedidos",
 };
 
-export default function RequestsPage() {
+export default async function RequestsPage() {
+  const requests = await getRequests();
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -15,7 +18,7 @@ export default function RequestsPage() {
         title="Pedidos"
         description="Arriba: pedidos del personal (se entregan del stock o quedan esperando compra). Abajo: las órdenes que ya enviamos al proveedor, esperando confirmar la entrega para sumar al stock."
       />
-      <RequestsShell />
+      <RequestsShell requests={requests} />
     </div>
   );
 }

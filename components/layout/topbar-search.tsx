@@ -36,11 +36,11 @@ import {
   loadOrders,
   subscribeOrders,
 } from "@/features/procurement/lib/orders-storage";
+import type { InternalRequest } from "@/features/requests/lib/requests";
 import {
   loadRequests,
   subscribeRequests,
-  type InternalRequest,
-} from "@/features/requests/lib/requests";
+} from "@/features/requests/lib/requests-storage";
 
 export function TopbarSearch() {
   const [open, setOpen] = useState(false);

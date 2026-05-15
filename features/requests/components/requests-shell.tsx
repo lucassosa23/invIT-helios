@@ -5,14 +5,16 @@ import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
-import { useRequests } from "../lib/use-requests";
 import type { InternalRequest } from "../lib/requests";
 import { NewRequestDialog } from "./new-request-dialog";
 import { RequestsList } from "./requests-list";
 import { OurPurchasesSection } from "@/features/procurement/components/our-purchases-section";
 
-export function RequestsShell() {
-  const { requests, hydrated } = useRequests();
+type Props = {
+  requests: InternalRequest[];
+};
+
+export function RequestsShell({ requests }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<InternalRequest | null>(null);
 
@@ -28,7 +30,9 @@ export function RequestsShell() {
 
   const sorted = useMemo(
     () =>
-      [...requests].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+      [...requests].sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      ),
     [requests],
   );
 
@@ -43,7 +47,7 @@ export function RequestsShell() {
 
       <RequestsList
         requests={sorted}
-        hydrated={hydrated}
+        hydrated
         onEdit={openEdit}
         onCreate={openCreate}
       />

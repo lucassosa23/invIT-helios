@@ -10,6 +10,10 @@ import { statusToDb as assetStatusToDb } from "@/features/inventory/lib/mappers"
 
 import { canTransition, type PurchaseOrderStatus } from "./orders";
 import { statusToDb } from "./mappers";
+import {
+  cascadeRequestsOnOrderCancelledAction,
+  reconcileAwaitingRequestsAction,
+} from "@/features/requests/lib/actions";
 
 // ============================================================
 // Schemas
@@ -150,7 +154,7 @@ export async function updateOrderAction(
 export async function transitionOrderStatusAction(
   id: string,
   next: PurchaseOrderStatus,
-): Promise<void> {
+): Promise<{ requestsReverted: number }> {
   await requireUser();
 
   const current = await prisma.purchaseOrder.findUniqueOrThrow({
@@ -172,7 +176,6 @@ export async function transitionOrderStatusAction(
   if (!canTransition(currentApp, next)) {
     throw new Error(`Transición inválida: ${currentApp} → ${next}`);
   }
-  // received y received_partial vienen siempre del flow de recepción.
   if (next === "received" || next === "received_partial") {
     throw new Error("Usá receiveOrderShipmentAction para marcar recibida.");
   }
@@ -185,14 +188,27 @@ export async function transitionOrderStatusAction(
     },
   });
 
+  // Si cancelaste, los pedidos vinculados vuelven a pending.
+  let requestsReverted = 0;
+  if (next === "cancelled") {
+    requestsReverted = await cascadeRequestsOnOrderCancelledAction(id);
+  }
+
   revalidateAll();
+  return { requestsReverted };
 }
 
-export async function deleteOrderAction(id: string): Promise<void> {
+export async function deleteOrderAction(
+  id: string,
+): Promise<{ requestsReverted: number }> {
   await requireUser();
-  // OrderLine.onDelete = Cascade en el schema → se borran las líneas solas.
+  // Antes de borrar, revertimos requests vinculados (al borrar la
+  // orden, InternalRequest.linkedOrderId queda NULL por SetNull,
+  // pero el status se queda en awaiting_purchase huérfano).
+  const requestsReverted = await cascadeRequestsOnOrderCancelledAction(id);
   await prisma.purchaseOrder.delete({ where: { id } });
   revalidateAll();
+  return { requestsReverted };
 }
 
 // ============================================================
@@ -208,6 +224,7 @@ export type ReceiveResult =
       created: number;
       totalAdded: number;
       newStatus: PurchaseOrderStatus;
+      requestsFlipped: number;
     }
   | { ok: false; reason: string };
 
@@ -368,6 +385,11 @@ export async function receiveOrderShipmentAction(
     };
   });
 
-  if (result.ok) revalidateAll();
-  return result;
+  if (!result.ok) return result;
+
+  // Reconcilio requests awaiting_purchase cuyo stock ahora alcanza.
+  const requestsFlipped = await reconcileAwaitingRequestsAction();
+
+  revalidateAll();
+  return { ...result, requestsFlipped };
 }

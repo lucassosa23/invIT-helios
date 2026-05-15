@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { logAudit } from "@/features/settings/lib/audit-log";
 import { loadOrders } from "@/features/procurement/lib/orders-storage";
-import { loadRequests } from "@/features/requests/lib/requests";
+import { loadRequests } from "@/features/requests/lib/requests-storage";
 import { loadInventory } from "@/lib/storage";
 import { loadMembers } from "@/features/settings/lib/members";
 import { loadCategories } from "@/features/settings/lib/categories";

@@ -46,12 +46,12 @@ import {
   updateOrderAction,
 } from "../lib/actions";
 import {
-  syncOrderRequestLinks,
-  loadRequests,
   PRIORITY_LABEL,
   PRIORITY_TONE,
   type InternalRequest,
 } from "@/features/requests/lib/requests";
+import { loadRequests } from "@/features/requests/lib/requests-storage";
+import { syncOrderRequestLinksAction } from "@/features/requests/lib/actions";
 import {
   findActiveOrderForAsset,
   loadDismissed,
@@ -409,7 +409,7 @@ function NewOrderBody({
       return;
     }
 
-    const { linked, unlinked } = syncOrderRequestLinks(
+    const { linked, unlinked } = await syncOrderRequestLinksAction(
       savedOrderId,
       selectedRequestIds,
     );

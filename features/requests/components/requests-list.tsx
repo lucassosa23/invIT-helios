@@ -21,11 +21,7 @@ import { loadInventory } from "@/lib/storage";
 import type { Asset } from "@/lib/fake-data";
 
 import {
-  applyDeliveryToInventory,
-  approveRequestToPurchase,
   canTransition,
-  loadRequests,
-  saveRequests,
   PRIORITY_LABEL,
   PRIORITY_TONE,
   STATUS_LABEL,
@@ -33,6 +29,12 @@ import {
   type InternalRequest,
   type RequestStatus,
 } from "../lib/requests";
+import {
+  applyDeliveryToInventory,
+  approveRequestToPurchase,
+  loadRequests,
+  saveRequests,
+} from "../lib/requests-storage";
 import { AssetPickerDialog } from "./asset-picker-dialog";
 
 type Props = {

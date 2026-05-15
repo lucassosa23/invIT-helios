@@ -29,13 +29,12 @@ import { getInventorySnapshot } from "@/lib/storage";
 import { useInventory } from "@/lib/hooks";
 
 import {
-  loadRequests,
   nextRequestRef,
-  saveRequests,
   PRIORITY_LABEL,
   PRIORITY_TONE,
   type InternalRequest,
 } from "../lib/requests";
+import { loadRequests, saveRequests } from "../lib/requests-storage";
 
 type Props = {
   open: boolean;

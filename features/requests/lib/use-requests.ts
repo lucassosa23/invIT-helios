@@ -2,14 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-import { subscribeInventory } from "@/lib/storage";
-
 import {
   loadRequests,
   reconcileAwaitingRequests,
   subscribeRequests,
-  type InternalRequest,
-} from "./requests";
+} from "./requests-storage";
+import type { InternalRequest } from "./requests";
+import { subscribeInventory } from "@/lib/storage";
 
 export function useRequests(): {
   requests: InternalRequest[];
@@ -25,11 +24,6 @@ export function useRequests(): {
     };
     compute();
 
-    // Cualquier cambio en el inventario (alta manual, edición, recepción
-    // de PO, etc.) dispara una reconciliación que flippea pedidos que
-    // ahora tienen stock suficiente. reconcileAwaitingRequests llama a
-    // saveRequests si hay cambios, lo que ya gatilla el subscribeRequests
-    // y refresca el estado.
     const onInventoryChange = () => {
       reconcileAwaitingRequests();
     };
@@ -37,8 +31,6 @@ export function useRequests(): {
     const unsubRequests = subscribeRequests(compute);
     const unsubInventory = subscribeInventory(onInventoryChange);
 
-    // Primera pasada de reconciliación al montar (por si hubo cambios
-    // mientras /requests no estaba abierto).
     reconcileAwaitingRequests();
 
     return () => {

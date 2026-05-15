@@ -21,11 +21,11 @@ import {
   loadOrders,
   subscribeOrders,
 } from "@/features/procurement/lib/orders-storage";
+import type { InternalRequest } from "@/features/requests/lib/requests";
 import {
   loadRequests,
   subscribeRequests,
-  type InternalRequest,
-} from "@/features/requests/lib/requests";
+} from "@/features/requests/lib/requests-storage";
 import { renderMonthlyReport } from "@/features/emails/monthly-report-template";
 import { sendEmail } from "@/features/emails/send-email";
 import {

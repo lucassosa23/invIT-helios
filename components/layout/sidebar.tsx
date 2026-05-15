@@ -10,7 +10,7 @@ import { ChevronsUpDown } from "lucide-react";
 import {
   loadRequests,
   subscribeRequests,
-} from "@/features/requests/lib/requests";
+} from "@/features/requests/lib/requests-storage";
 import {
   loadPreferences,
   subscribePreferences,

@@ -32,9 +32,6 @@ import {
   deleteOrderAction,
   transitionOrderStatusAction,
 } from "../lib/actions";
-import {
-  cascadeRequestsOnOrderCancelled,
-} from "@/features/requests/lib/requests";
 import { ReceiveOrderDialog } from "./receive-order-dialog";
 
 type Props = {
@@ -138,15 +135,12 @@ function OrderCard({
     if (next === "received" || next === "received_partial") return;
 
     try {
-      await transitionOrderStatusAction(order.id, next);
-      if (next === "cancelled") {
-        const reverted = cascadeRequestsOnOrderCancelled(order.id);
-        if (reverted > 0) {
-          toast.warning(
-            `${reverted} pedido${reverted === 1 ? "" : "s"} volvieron a pendiente`,
-            { description: "La orden vinculada fue cancelada." },
-          );
-        }
+      const res = await transitionOrderStatusAction(order.id, next);
+      if (next === "cancelled" && res.requestsReverted > 0) {
+        toast.warning(
+          `${res.requestsReverted} pedido${res.requestsReverted === 1 ? "" : "s"} volvieron a pendiente`,
+          { description: "La orden vinculada fue cancelada." },
+        );
       }
       toast.success(`Orden ${STATUS_LABEL[next].toLowerCase()}`, {
         description: order.reference,
@@ -160,7 +154,6 @@ function OrderCard({
   const handleDelete = async () => {
     try {
       await deleteOrderAction(order.id);
-      cascadeRequestsOnOrderCancelled(order.id);
       toast(`${order.reference} eliminada`, {
         action: {
           label: "Deshacer",
