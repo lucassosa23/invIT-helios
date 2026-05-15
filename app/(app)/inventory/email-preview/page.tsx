@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { getLocations } from "@/lib/fake-data";
 import { loadInventory, subscribeInventory } from "@/lib/storage";
 import { renderLowStockEmail } from "@/features/emails/low-stock-template";
+import { sendEmail } from "@/features/emails/send-email";
 import type { Asset } from "@/lib/fake-data";
 
 const MONTHS = [
@@ -34,7 +35,7 @@ export default function EmailPreviewPage() {
 
   const [items, setItems] = useState<Asset[]>([]);
   const [hydrated, setHydrated] = useState(false);
-  const [recipient, setRecipient] = useState("sistemas@heliossalud.com.ar");
+  const [recipient, setRecipient] = useState("");
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -80,21 +81,13 @@ export default function EmailPreviewPage() {
     }
     setSending(true);
     try {
-      const res = await fetch("/api/notify-low-stock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: recipient.trim(),
-          html,
-          subject: `invIT — Stock bajo · ${monthLabel}`,
-        }),
+      const result = await sendEmail({
+        to: recipient.trim(),
+        html,
+        subject: `invIT — Stock bajo · ${monthLabel}`,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error("No se pudo enviar", {
-          description:
-            data?.error ?? `Error ${res.status}. Configurá Resend en .env.`,
-        });
+      if (!result.ok) {
+        toast.error("No se pudo enviar", { description: result.error });
       } else {
         toast.success("Email enviado", {
           description: `Destinatario: ${recipient.trim()}`,

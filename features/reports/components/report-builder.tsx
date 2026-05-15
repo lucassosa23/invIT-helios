@@ -25,6 +25,7 @@ import {
   type InternalRequest,
 } from "@/features/requests/lib/requests";
 import { renderMonthlyReport } from "@/features/emails/monthly-report-template";
+import { sendEmail } from "@/features/emails/send-email";
 import {
   clearExclusions,
   loadConfig,
@@ -248,20 +249,18 @@ export function ReportBuilder() {
       const filename = reportExcelFilename(monthLabel);
 
       const promises = config.recipients.map((to) =>
-        fetch("/api/notify-low-stock", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            to,
-            html,
-            subject: `invIT — Reporte mensual · ${monthLabel}`,
-            attachments: [{ filename, content: excelBase64 }],
-          }),
+        sendEmail({
+          to,
+          html,
+          subject: `invIT — Reporte mensual · ${monthLabel}`,
+          attachments: [{ filename, content: excelBase64 }],
         }),
       );
       const results = await Promise.allSettled(promises);
       const failed = results.filter(
-        (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok),
+        (r) =>
+          r.status === "rejected" ||
+          (r.status === "fulfilled" && !r.value.ok),
       ).length;
       if (failed === 0) {
         markSentThisMonth();
