@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   Download,
@@ -17,14 +17,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { statusFromStock } from "@/lib/fake-data";
 import type { Asset, Location, Status } from "@/lib/fake-data";
-import {
-  clearInventory,
-  getInventorySnapshot,
-  saveInventory,
-} from "@/lib/storage";
-import { useInventory, useIsMounted } from "@/lib/hooks";
 
 import {
   downloadTemplate,
@@ -33,6 +26,16 @@ import {
   rowsToAssets,
   type ParsedRow,
 } from "../lib/excel";
+import {
+  addAssetAction,
+  adjustAssetStockAction,
+  appendInventoryAction,
+  clearInventoryAction,
+  deleteAssetAction,
+  replaceInventoryAction,
+  restoreAssetAction,
+  updateAssetAction,
+} from "../lib/actions";
 import { ImportPreview } from "./import-preview";
 import { InventoryItemCard } from "./inventory-item-card";
 import { ItemFormDialog, type ItemFormValues } from "./item-form-dialog";
@@ -50,32 +53,18 @@ const STATUS_OPTIONS: Array<{
 ];
 
 type Props = {
+  assets: Asset[];
   locations: Location[];
   initialQuery?: string;
   initialStatus?: "all" | Status;
 };
 
-let newIdSeed = 1;
-
-function applyInventoryUpdate(
-  updater: Asset[] | ((prev: Asset[]) => Asset[]),
-) {
-  const prev = getInventorySnapshot();
-  const next =
-    typeof updater === "function"
-      ? (updater as (p: Asset[]) => Asset[])(prev)
-      : updater;
-  saveInventory(next);
-}
-
 export function InventoryList({
+  assets,
   locations,
   initialQuery = "",
   initialStatus = "all",
 }: Props) {
-  const assets = useInventory();
-  const hydrated = useIsMounted();
-
   const [query, setQuery] = useState(initialQuery);
   const [status, setStatus] = useState<"all" | Status>(initialStatus);
   const [category, setCategory] = useState<string>("all");
@@ -86,6 +75,10 @@ export function InventoryList({
   const [importFileName, setImportFileName] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Pending: gateamos botones contra acciones concurrentes y dejamos que
+  // Next propague la nueva data por revalidatePath sin que se "freeze" la UI.
+  const [, startMutation] = useTransition();
 
   const locationMap = useMemo(
     () => Object.fromEntries(locations.map((l) => [l.id, l])),
@@ -134,76 +127,71 @@ export function InventoryList({
   };
 
   const handleSubmit = (values: ItemFormValues) => {
-    if (editingId) {
-      applyInventoryUpdate((prev) =>
-        prev.map((a) =>
-          a.id === editingId
-            ? {
-                ...a,
-                ...values,
-                status: statusFromStock(values.stock, values.threshold),
-                updatedAt: new Date(),
-              }
-            : a,
-        ),
-      );
-      toast.success("Item actualizado", {
-        description: values.name,
-      });
-    } else {
-      const id = `ast_new_${++newIdSeed}_${Date.now().toString(36)}`;
-      const skuBase = `${values.category.slice(0, 3).toUpperCase() || "NEW"}-${
-        values.brand.slice(0, 3).toUpperCase() || "GEN"
-      }-${id.slice(-4).toUpperCase()}`;
-      const asset: Asset = {
-        id,
-        sku: skuBase,
-        name: values.name,
-        brand: values.brand,
-        category: values.category,
-        stock: values.stock,
-        threshold: values.threshold,
-        unitCost: 0,
-        locationId: values.locationId,
-        vendorId: "",
-        warrantyExpiresAt: new Date(0),
-        status: statusFromStock(values.stock, values.threshold),
-        updatedAt: new Date(),
-      };
-      applyInventoryUpdate((prev) => [asset, ...prev]);
-      toast.success("Item agregado", {
-        description: values.name,
-      });
-    }
+    const isEdit = !!editingId;
+    const idAtSubmit = editingId;
     setSheetOpen(false);
     setEditingId(null);
+    startMutation(async () => {
+      try {
+        if (isEdit && idAtSubmit) {
+          await updateAssetAction(idAtSubmit, values);
+          toast.success("Item actualizado", { description: values.name });
+        } else {
+          await addAssetAction(values);
+          toast.success("Item agregado", { description: values.name });
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error(isEdit ? "No se pudo actualizar" : "No se pudo agregar");
+      }
+    });
   };
 
   const handleAdjust = (id: string, delta: number) => {
-    applyInventoryUpdate((prev) =>
-      prev.map((a) => {
-        if (a.id !== id) return a;
-        const newStock = Math.max(0, a.stock + delta);
-        if (newStock === a.stock) return a;
-        return {
-          ...a,
-          stock: newStock,
-          status: statusFromStock(newStock, a.threshold),
-          updatedAt: new Date(),
-        };
-      }),
-    );
+    startMutation(async () => {
+      try {
+        await adjustAssetStockAction(id, delta);
+      } catch (err) {
+        console.error(err);
+        toast.error("No se pudo ajustar el stock");
+      }
+    });
   };
 
   const handleDelete = (id: string) => {
     const target = assets.find((a) => a.id === id);
     if (!target) return;
-    applyInventoryUpdate((prev) => prev.filter((a) => a.id !== id));
-    toast(`${target.name} eliminado`, {
-      action: {
-        label: "Deshacer",
-        onClick: () => applyInventoryUpdate((prev) => [target, ...prev]),
-      },
+    startMutation(async () => {
+      try {
+        await deleteAssetAction(id);
+        toast(`${target.name} eliminado`, {
+          action: {
+            label: "Deshacer",
+            onClick: () => {
+              startMutation(async () => {
+                try {
+                  await restoreAssetAction({
+                    id: target.id,
+                    sku: target.sku,
+                    name: target.name,
+                    brand: target.brand,
+                    category: target.category,
+                    stock: target.stock,
+                    threshold: target.threshold,
+                    locationId: target.locationId || null,
+                  });
+                } catch (err) {
+                  console.error(err);
+                  toast.error("No se pudo restaurar");
+                }
+              });
+            },
+          },
+        });
+      } catch (err) {
+        console.error(err);
+        toast.error("No se pudo eliminar");
+      }
     });
   };
 
@@ -230,19 +218,53 @@ export function InventoryList({
 
   const handleReplace = () => {
     const next = rowsToAssets(importRows);
-    applyInventoryUpdate(next);
     setImportOpen(false);
-    toast.success(`Inventario reemplazado`, {
-      description: `${next.length} items importados`,
+    startMutation(async () => {
+      try {
+        await replaceInventoryAction(
+          next.map((a) => ({
+            name: a.name,
+            brand: a.brand,
+            category: a.category,
+            stock: a.stock,
+            threshold: a.threshold,
+            locationId: a.locationId,
+            sku: a.sku,
+          })),
+        );
+        toast.success("Inventario reemplazado", {
+          description: `${next.length} items importados`,
+        });
+      } catch (err) {
+        console.error(err);
+        toast.error("No se pudo reemplazar el inventario");
+      }
     });
   };
 
   const handleAppend = () => {
     const next = rowsToAssets(importRows);
-    applyInventoryUpdate((prev) => [...next, ...prev]);
     setImportOpen(false);
-    toast.success(`Items agregados`, {
-      description: `${next.length} items sumados al inventario`,
+    startMutation(async () => {
+      try {
+        await appendInventoryAction(
+          next.map((a) => ({
+            name: a.name,
+            brand: a.brand,
+            category: a.category,
+            stock: a.stock,
+            threshold: a.threshold,
+            locationId: a.locationId,
+            sku: a.sku,
+          })),
+        );
+        toast.success("Items agregados", {
+          description: `${next.length} items sumados al inventario`,
+        });
+      } catch (err) {
+        console.error(err);
+        toast.error("No se pudo agregar al inventario");
+      }
     });
   };
 
@@ -262,13 +284,39 @@ export function InventoryList({
 
   const handleClearAll = () => {
     if (assets.length === 0) return;
-    const snapshot = assets;
-    clearInventory();
-    toast(`Inventario vaciado`, {
-      action: {
-        label: "Deshacer",
-        onClick: () => applyInventoryUpdate(snapshot),
-      },
+    const snapshot = assets.map((a) => ({ ...a }));
+    startMutation(async () => {
+      try {
+        await clearInventoryAction();
+        toast(`Inventario vaciado`, {
+          action: {
+            label: "Deshacer",
+            onClick: () => {
+              startMutation(async () => {
+                try {
+                  await appendInventoryAction(
+                    snapshot.map((a) => ({
+                      name: a.name,
+                      brand: a.brand,
+                      category: a.category,
+                      stock: a.stock,
+                      threshold: a.threshold,
+                      locationId: a.locationId,
+                      sku: a.sku,
+                    })),
+                  );
+                } catch (err) {
+                  console.error(err);
+                  toast.error("No se pudo restaurar");
+                }
+              });
+            },
+          },
+        });
+      } catch (err) {
+        console.error(err);
+        toast.error("No se pudo vaciar el inventario");
+      }
     });
   };
 
@@ -276,7 +324,7 @@ export function InventoryList({
     ? assets.find((a) => a.id === editingId) ?? null
     : null;
 
-  const isEmpty = hydrated && assets.length === 0;
+  const isEmpty = assets.length === 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -400,8 +448,7 @@ export function InventoryList({
               Tu inventario está vacío
             </h3>
             <p className="mt-1.5 max-w-md text-[13px] text-muted-foreground">
-              Importá tu Excel actual o empezá a agregar items manualmente. Todo
-              queda guardado en este navegador.
+              Importá tu Excel actual o empezá a agregar items manualmente.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <Button size="sm" onClick={triggerFilePicker}>

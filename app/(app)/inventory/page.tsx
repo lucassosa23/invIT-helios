@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/page-header";
 import { InventoryList } from "@/features/inventory/components/inventory-list";
-import { getLocations } from "@/lib/fake-data";
+import {
+  getInventory,
+  getInventoryLocations,
+} from "@/features/inventory/lib/queries";
 import type { Status } from "@/lib/fake-data";
 
 export const metadata: Metadata = {
@@ -21,16 +24,20 @@ export default async function InventoryPage({
   const initialStatus: "all" | Status =
     sp.filter === "critical" || sp.filter === "low" ? sp.filter : "all";
 
-  const locations = getLocations();
+  const [assets, locations] = await Promise.all([
+    getInventory(),
+    getInventoryLocations(),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="Equipos, periféricos y repuestos"
         title="Inventario"
-        description="Importá tu Excel para arrancar. Sumá, editá y ajustá el stock con un clic — todo queda guardado en este navegador."
+        description="Importá tu Excel para arrancar. Sumá, editá y ajustá el stock con un clic — todo guardado en tu workspace."
       />
       <InventoryList
+        assets={assets}
         locations={locations}
         initialQuery={initialQuery}
         initialStatus={initialStatus}
