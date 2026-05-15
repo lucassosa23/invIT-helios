@@ -21,6 +21,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { Asset } from "@/lib/fake-data";
 import { cn } from "@/lib/utils";
 
 import {
@@ -74,10 +75,10 @@ function buildHref(notif: StockNotif): string {
   return `/inventory?q=${q}&filter=${filter}`;
 }
 
-export function NotificationsBell() {
+export function NotificationsBell({ assets }: { assets: Asset[] }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const { visible, readIds } = useNotifications();
+  const { visible, readIds } = useNotifications(assets);
   const unread = visible.filter((n) => !readIds.has(n.id)).length;
 
   const shown = expanded ? visible : visible.slice(0, PREVIEW_LIMIT);
@@ -97,8 +98,12 @@ export function NotificationsBell() {
   };
 
   const handleClearAll = () => {
-    dismissAll();
+    dismissAll(visible);
     setExpanded(false);
+  };
+
+  const handleMarkAllRead = () => {
+    markAllRead(visible);
   };
 
   return (
@@ -151,7 +156,7 @@ export function NotificationsBell() {
                   type="button"
                   size="xs"
                   variant="ghost"
-                  onClick={() => markAllRead()}
+                  onClick={handleMarkAllRead}
                   className="text-muted-foreground hover:text-foreground"
                   title="Marcar todas como leídas"
                 >

@@ -22,7 +22,7 @@ export default async function AppShellLayout({
       <div className="grid min-h-svh md:grid-cols-[280px_1fr]">
         <Sidebar />
         <div className="flex min-w-0 flex-col">
-          <Topbar />
+          <Topbar assets={assets} />
           <MonthlyReminderBanner />
           <main className="flex-1">
             <div className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

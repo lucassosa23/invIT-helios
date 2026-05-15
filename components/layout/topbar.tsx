@@ -7,8 +7,9 @@ import { UserMenu } from "./user-menu";
 import { Button } from "@/components/ui/button";
 import { NotificationsBell } from "@/features/notifications/components/notifications-bell";
 import { getCurrentUser } from "@/lib/auth/current-user";
+import type { Asset } from "@/lib/fake-data";
 
-export async function Topbar() {
+export async function Topbar({ assets }: { assets: Asset[] }) {
   const user = await getCurrentUser();
 
   return (
@@ -31,7 +32,7 @@ export async function Topbar() {
       </div>
 
       <div className="flex items-center gap-1">
-        <NotificationsBell />
+        <NotificationsBell assets={assets} />
         <ThemeToggle />
         <div className="mx-1 h-5 w-px bg-border" />
         {user ? (

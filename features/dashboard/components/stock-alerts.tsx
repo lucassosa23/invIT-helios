@@ -1,38 +1,15 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, PackageX } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
 import type { Asset, Location } from "@/lib/fake-data";
-import { loadInventory, subscribeInventory } from "@/lib/storage";
 
 type Props = {
-  fallback: Asset[];
+  items: Asset[];
   locations: Location[];
 };
 
-export function StockAlerts({ fallback, locations }: Props) {
-  const [items, setItems] = useState<Asset[]>(fallback);
-
-  useEffect(() => {
-    const compute = () => {
-      const stored = loadInventory();
-      if (!stored) {
-        setItems(fallback);
-        return;
-      }
-      const next = stored
-        .filter((a) => a.status === "critical" || a.status === "out")
-        .sort((a, b) => a.stock - b.stock)
-        .slice(0, 6);
-      setItems(next);
-    };
-    compute();
-    return subscribeInventory(compute);
-  }, [fallback]);
-
+export function StockAlerts({ items, locations }: Props) {
   const locationMap = Object.fromEntries(locations.map((l) => [l.id, l]));
 
   if (items.length === 0) {

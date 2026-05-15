@@ -17,7 +17,7 @@ import { LocationDistribution } from "./location-distribution";
 import { RecentActivity } from "./recent-activity";
 
 type Props = {
-  fallbackAssets: Asset[];
+  assets: Asset[];
   locations: Location[];
   procurement: ProcurementItem[];
   requests: RequestItem[];
@@ -25,13 +25,13 @@ type Props = {
 };
 
 export function DashboardShell({
-  fallbackAssets,
+  assets,
   locations,
   procurement,
   requests,
   activity,
 }: Props) {
-  const stats = useInventoryStats(fallbackAssets);
+  const stats = useInventoryStats(assets);
 
   const procurementPending = procurement.filter(
     (p) => p.status === "pending" || p.status === "ready",

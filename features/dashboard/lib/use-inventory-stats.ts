@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import type { Asset, Status } from "@/lib/fake-data";
-import { loadInventory, subscribeInventory } from "@/lib/storage";
 
 type Counts = Record<Status, number>;
 
@@ -26,8 +25,6 @@ export type InventoryStats = {
   }>;
   criticalItems: Asset[];
   trend: number[];
-  hydrated: boolean;
-  usingFallback: boolean;
 };
 
 const emptyCounts = (): Counts => ({
@@ -48,7 +45,7 @@ function dominantStatus(counts: Counts): Status {
   return "healthy";
 }
 
-function computeStats(assets: Asset[]): Omit<InventoryStats, "hydrated" | "usingFallback"> {
+function computeStats(assets: Asset[]): InventoryStats {
   const counts = emptyCounts();
   const catMap = new Map<string, Counts>();
   const locMap = new Map<string, Counts>();
@@ -108,29 +105,8 @@ function buildTrend(total: number): number[] {
   });
 }
 
-export function useInventoryStats(fallback: Asset[]): InventoryStats {
-  const [assets, setAssets] = useState<Asset[]>(fallback);
-  const [hydrated, setHydrated] = useState(false);
-  const [usingFallback, setUsingFallback] = useState(true);
-
-  useEffect(() => {
-    const compute = () => {
-      const stored = loadInventory();
-      if (stored && stored.length > 0) {
-        setAssets(stored);
-        setUsingFallback(false);
-      } else {
-        setAssets(fallback);
-        setUsingFallback(true);
-      }
-      setHydrated(true);
-    };
-    compute();
-    return subscribeInventory(compute);
-  }, [fallback]);
-
-  return useMemo(
-    () => ({ ...computeStats(assets), hydrated, usingFallback }),
-    [assets, hydrated, usingFallback],
-  );
+/** Computa stats derivadas del array de assets. La data viene del
+ *  Server Component del page; este hook ya no toca localStorage. */
+export function useInventoryStats(assets: Asset[]): InventoryStats {
+  return useMemo(() => computeStats(assets), [assets]);
 }

@@ -1,6 +1,3 @@
-"use client";
-
-import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Inbox,
@@ -12,7 +9,6 @@ import {
 import { Card } from "@/components/ui/card";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { loadInventory, subscribeInventory } from "@/lib/storage";
 
 type KpiTone = "critical" | "info" | "healthy" | "low";
 
@@ -89,41 +85,7 @@ const KPIS: KpiConfig[] = [
   },
 ];
 
-export function KpiCards({ seed }: { seed: KpiValues }) {
-  const [overrides, setOverrides] = useState<{
-    stockCritical: number;
-    warrantyExpiring: number;
-  } | null>(null);
-
-  useEffect(() => {
-    const compute = () => {
-      const stored = loadInventory();
-      if (!stored) {
-        setOverrides(null);
-        return;
-      }
-      const stockCritical = stored.filter(
-        (a) => a.status === "critical" || a.status === "out",
-      ).length;
-      const ninetyDays = Date.now() + 90 * 24 * 3600 * 1000;
-      const warrantyExpiring = stored.filter((a) => {
-        const t = a.warrantyExpiresAt.getTime();
-        return t > Date.now() && t < ninetyDays;
-      }).length;
-      setOverrides({ stockCritical, warrantyExpiring });
-    };
-    compute();
-    return subscribeInventory(compute);
-  }, []);
-
-  const values = useMemo<KpiValues>(
-    () =>
-      overrides
-        ? { ...seed, ...overrides }
-        : seed,
-    [seed, overrides],
-  );
-
+export function KpiCards({ values }: { values: KpiValues }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {KPIS.map((c, i) => {

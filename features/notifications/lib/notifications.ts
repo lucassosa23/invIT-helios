@@ -1,10 +1,6 @@
 "use client";
 
 import type { Asset } from "@/lib/fake-data";
-import {
-  getInventorySnapshot,
-  subscribeInventory,
-} from "@/lib/storage";
 import { loadNotifications } from "@/features/settings/lib/notifications";
 
 const READ_KEY = "invit:notifications-read:v1";
@@ -20,7 +16,7 @@ export type StockNotif = {
   asset: Asset;
 };
 
-export type NotificationsSnapshot = {
+export type NotificationsState = {
   visible: StockNotif[];
   readIds: ReadonlySet<string>;
 };
@@ -31,11 +27,6 @@ function isBrowser() {
 
 let readCache: Set<string> | null = null;
 let dismissedCache: Set<string> | null = null;
-let snapshotCache: NotificationsSnapshot | null = null;
-const EMPTY_SNAPSHOT: NotificationsSnapshot = {
-  visible: [],
-  readIds: new Set<string>(),
-};
 
 function readSetFromStorage(key: string): Set<string> {
   if (!isBrowser()) return new Set();
@@ -56,8 +47,7 @@ function getReadIds(): Set<string> {
 }
 
 function getDismissedIds(): Set<string> {
-  if (dismissedCache === null)
-    dismissedCache = readSetFromStorage(DISMISSED_KEY);
+  if (dismissedCache === null) dismissedCache = readSetFromStorage(DISMISSED_KEY);
   return dismissedCache;
 }
 
@@ -66,7 +56,7 @@ function persistReadIds(set: Set<string>) {
   if (!isBrowser()) return;
   try {
     localStorage.setItem(READ_KEY, JSON.stringify([...set]));
-    window.dispatchEvent(new Event("invit:notifications-read-changed"));
+    window.dispatchEvent(new Event("invit:notifications-state-changed"));
   } catch {
     /* ignore quota */
   }
@@ -77,21 +67,24 @@ function persistDismissedIds(set: Set<string>) {
   if (!isBrowser()) return;
   try {
     localStorage.setItem(DISMISSED_KEY, JSON.stringify([...set]));
-    window.dispatchEvent(new Event("invit:notifications-read-changed"));
+    window.dispatchEvent(new Event("invit:notifications-state-changed"));
   } catch {
     /* ignore quota */
   }
 }
 
-function deriveVisible(): StockNotif[] {
-  const inventory = getInventorySnapshot();
+/** Derivación pura: dado un set de assets + la config de notifs,
+ *  devuelve la lista visible de StockNotif. Hace GC del set de
+ *  dismissed (saca ids cuya condición original ya no existe), así
+ *  cuando un item se recupera y vuelve a degradarse, la notif vuelve. */
+function deriveVisible(assets: Asset[]): StockNotif[] {
   const cfg = loadNotifications();
   const allowOut = cfg.channels["stock.out"]?.inapp ?? true;
   const allowCritical = cfg.channels["stock.critical"]?.inapp ?? true;
   const allowLow = cfg.channels["stock.low"]?.inapp ?? true;
 
   const raw: StockNotif[] = [];
-  for (const a of inventory) {
+  for (const a of assets) {
     if (a.status === "out" && allowOut) {
       raw.push({
         id: `inv:${a.id}:out`,
@@ -116,8 +109,7 @@ function deriveVisible(): StockNotif[] {
     }
   }
 
-  // GC del set de dismissed: si la condición original ya no existe, sacamos
-  // el id para que al volver a degradarse el item el aviso reaparezca.
+  // GC del set de dismissed.
   const dismissed = getDismissedIds();
   if (dismissed.size > 0) {
     const liveIds = new Set(raw.map((n) => n.id));
@@ -140,41 +132,24 @@ function deriveVisible(): StockNotif[] {
   return list;
 }
 
-export function getNotificationsSnapshot(): NotificationsSnapshot {
-  if (!isBrowser()) return EMPTY_SNAPSHOT;
-  if (snapshotCache === null) {
-    snapshotCache = {
-      visible: deriveVisible(),
-      readIds: getReadIds(),
-    };
-  }
-  return snapshotCache;
-}
-
-export function getServerNotificationsSnapshot(): NotificationsSnapshot {
-  return EMPTY_SNAPSHOT;
-}
-
-function invalidateSnapshot() {
-  snapshotCache = null;
-}
-
-export function subscribeNotifications(cb: () => void): () => void {
-  if (!isBrowser()) return () => {};
-  const handler = () => {
-    invalidateSnapshot();
-    cb();
+export function computeNotificationsState(assets: Asset[]): NotificationsState {
+  return {
+    visible: deriveVisible(assets),
+    readIds: getReadIds(),
   };
-  const unsubInventory = subscribeInventory(handler);
+}
+
+/** Subscribe a cambios del lado cliente: settings + read/dismissed.
+ *  El inventory cambia via re-render del Server Component (no lo
+ *  modela este subscribe). */
+export function subscribeNotificationsState(cb: () => void): () => void {
+  if (!isBrowser()) return () => {};
+  const handler = () => cb();
+  window.addEventListener("invit:notifications-state-changed", handler);
   window.addEventListener("invit:notifications-changed", handler);
-  window.addEventListener("invit:notifications-read-changed", handler);
   return () => {
-    unsubInventory();
+    window.removeEventListener("invit:notifications-state-changed", handler);
     window.removeEventListener("invit:notifications-changed", handler);
-    window.removeEventListener(
-      "invit:notifications-read-changed",
-      handler,
-    );
   };
 }
 
@@ -191,16 +166,12 @@ export function markRead(ids: string[]) {
   if (changed) persistReadIds(set);
 }
 
-export function markAllRead() {
-  const { visible } = getNotificationsSnapshot();
+export function markAllRead(visible: ReadonlyArray<StockNotif>) {
   if (visible.length === 0) return;
   markRead(visible.map((n) => n.id));
 }
 
-/** Oculta todas las notificaciones visibles ahora. Se vuelven a mostrar
- *  cuando el item se recupera y degrada de nuevo (GC en deriveVisible). */
-export function dismissAll() {
-  const { visible } = getNotificationsSnapshot();
+export function dismissAll(visible: ReadonlyArray<StockNotif>) {
   if (visible.length === 0) return;
   const set = new Set(getDismissedIds());
   for (const n of visible) set.add(n.id);
