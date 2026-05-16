@@ -3,10 +3,15 @@ import "server-only";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-/** Schema reusable para IDs que vienen del cliente (Prisma cuid). Los
- *  Server Actions deben usarlo en toda función que reciba un id como
- *  parámetro: previene que el cliente mande algo arbitrario al ORM. */
-export const idSchema = z.cuid();
+/** Schema reusable para IDs que vienen del cliente. Acepta cuid (formato
+ *  Prisma) y también los ids prefijados del seed legacy (`ast_001`,
+ *  `req_001`, etc.). Filtra cualquier cosa que no sea alfanumérico /
+ *  underscore / hyphen, así nada raro llega al ORM. */
+export const idSchema = z
+  .string()
+  .min(3)
+  .max(40)
+  .regex(/^[a-zA-Z0-9_-]+$/, "id inválido");
 
 /** Helper para parsear un id desde el cliente y tirar mensaje claro si
  *  no matchea. */
