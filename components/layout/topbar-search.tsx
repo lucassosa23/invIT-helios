@@ -32,20 +32,43 @@ import { SETTINGS_SECTIONS } from "@/features/settings/lib/sections";
 import type { Asset } from "@/lib/fake-data";
 import type { PurchaseOrder } from "@/features/procurement/lib/orders";
 import type { InternalRequest } from "@/features/requests/lib/requests";
+import { loadSearchPayloadAction } from "@/features/search/search-actions";
 
-type Props = {
-  inventory: Asset[];
-  orders: PurchaseOrder[];
-  requests: InternalRequest[];
-};
-
-export function TopbarSearch({ inventory, orders, requests }: Props) {
+export function TopbarSearch() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [inventory, setInventory] = useState<Asset[]>([]);
+  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [requests, setRequests] = useState<InternalRequest[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { setTheme, resolvedTheme } = useTheme();
+
+  // Carga lazy: la primera vez que el usuario abre el search traemos
+  // inventory + orders + requests con una sola server action. Hasta
+  // entonces no le pegamos a la DB para esto — saca peso del layout
+  // en cada navegación.
+  useEffect(() => {
+    if (!open || loaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const payload = await loadSearchPayloadAction();
+        if (cancelled) return;
+        setInventory(payload.inventory);
+        setOrders(payload.orders);
+        setRequests(payload.requests);
+        setLoaded(true);
+      } catch {
+        /* silencioso: si falla simplemente no aparecen resultados */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, loaded]);
 
   // Atajo Cmd/Ctrl+K → focusea el input
   useEffect(() => {

@@ -8,18 +8,8 @@ import { Button } from "@/components/ui/button";
 import { NotificationsBell } from "@/features/notifications/components/notifications-bell";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import type { Asset } from "@/lib/fake-data";
-import type { PurchaseOrder } from "@/features/procurement/lib/orders";
-import type { InternalRequest } from "@/features/requests/lib/requests";
 
-export async function Topbar({
-  assets,
-  orders,
-  requests,
-}: {
-  assets: Asset[];
-  orders: PurchaseOrder[];
-  requests: InternalRequest[];
-}) {
+export async function Topbar({ assets }: { assets: Asset[] }) {
   const user = await getCurrentUser();
 
   return (
@@ -38,11 +28,7 @@ export async function Topbar({
       </div>
 
       <div className="flex flex-1 justify-center px-2">
-        <TopbarSearch
-          inventory={assets}
-          orders={orders}
-          requests={requests}
-        />
+        <TopbarSearch />
       </div>
 
       <div className="flex items-center gap-1">
