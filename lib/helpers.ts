@@ -1,6 +1,6 @@
 import "server-only";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { z } from "zod";
 
 /** Schema reusable para IDs que vienen del cliente. Acepta cuid (formato
@@ -44,13 +44,32 @@ export function monthlyPlanReferenceFor(d: Date = new Date()): string {
   return `PO-PLAN-${monthYearString(d)}`;
 }
 
-/** Revalida los paths que pueden cambiar tras una mutación de dominio.
- *  Las pages relevantes (dashboard, inventory, requests, procurement,
- *  reports) se recomponen en el próximo render. */
+/** Tags de unstable_cache que las queries del dominio usan. Mutar
+ *  cualquier entidad invalida el cache server-side de TODAS las queries
+ *  tageadas — es defensivo: una receive afecta inventory + orders +
+ *  requests, así que en vez de afinar caso por caso preferimos sobre-
+ *  invalidar (las queries son rápidas y se recalculan cuando alguien
+ *  navega de nuevo). */
+export const CACHE_TAGS = {
+  inventory: "inventory",
+  orders: "orders",
+  requests: "requests",
+} as const;
+
+/** Revalida path-based + tag-based.
+ *  - Path: refresca el server component tree de las pages activas.
+ *  - Tag: invalida el cache de unstable_cache, para que las queries
+ *    cacheadas peguen DB la próxima vez. */
 export function revalidateDomainPaths() {
   revalidatePath("/dashboard");
   revalidatePath("/inventory");
   revalidatePath("/requests");
   revalidatePath("/procurement");
   revalidatePath("/reports");
+  // updateTag (Next 16) invalida el unstable_cache con "read-your-own-
+  // writes" — la siguiente lectura desde una Server Action ve los datos
+  // frescos sin esperar al TTL.
+  updateTag(CACHE_TAGS.inventory);
+  updateTag(CACHE_TAGS.orders);
+  updateTag(CACHE_TAGS.requests);
 }
