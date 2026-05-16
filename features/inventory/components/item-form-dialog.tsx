@@ -25,6 +25,7 @@ export type ItemFormValues = {
   threshold: number;
   locationId: string;
   dismissedFromAutoPlan?: boolean;
+  barcode?: string;
 };
 
 type Props = {
@@ -42,6 +43,7 @@ const empty: ItemFormValues = {
   stock: 1,
   threshold: 5,
   locationId: "",
+  barcode: "",
 };
 
 export function ItemFormDialog({
@@ -90,6 +92,7 @@ function ItemFormBody({
           stock: editing.stock,
           threshold: editing.threshold,
           locationId: editing.locationId,
+          barcode: editing.barcode ?? "",
         }
       : { ...empty, locationId: locations[0]?.id ?? "" },
   );
@@ -112,6 +115,7 @@ function ItemFormBody({
       category: values.category.trim() || "Otros",
       stock: Math.max(0, Math.floor(values.stock)),
       threshold: Math.max(1, Math.floor(values.threshold)),
+      barcode: values.barcode?.trim() || "",
       dismissedFromAutoPlan: editing ? !includeInAutoPlan : undefined,
     });
   };
@@ -235,6 +239,28 @@ function ItemFormBody({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="barcode" className="text-[12px] font-medium">
+            Código de barras{" "}
+            <span className="font-normal text-muted-foreground/70">
+              (opcional)
+            </span>
+          </Label>
+          <Input
+            id="barcode"
+            value={values.barcode ?? ""}
+            onChange={(e) => update("barcode", e.target.value)}
+            placeholder="Escaneá el código o ingresalo manualmente"
+            className="h-9 font-mono"
+            inputMode="text"
+            autoComplete="off"
+          />
+          <p className="text-[11.5px] text-muted-foreground">
+            Permite reconocerlo desde la sección de escaneo. Lo podés dejar
+            vacío y vincularlo después al escanear por primera vez.
+          </p>
         </div>
 
         {editing && (

@@ -21,6 +21,7 @@ const itemValuesSchema = z.object({
   threshold: z.number().int().min(1),
   locationId: z.string().optional(),
   dismissedFromAutoPlan: z.boolean().optional(),
+  barcode: z.string().trim().max(64).nullish(),
 });
 
 const importRowSchema = z.object({
@@ -61,6 +62,7 @@ export async function addAssetAction(values: ItemFormValuesInput) {
       locationId: v.locationId || null,
       status: statusToDb(status),
       dismissedFromAutoPlan: v.dismissedFromAutoPlan ?? false,
+      barcode: v.barcode?.trim() || null,
     },
   });
 
@@ -87,6 +89,7 @@ export async function updateAssetAction(
       locationId: v.locationId || null,
       status: statusToDb(status),
       dismissedFromAutoPlan: v.dismissedFromAutoPlan,
+      barcode: v.barcode === undefined ? undefined : v.barcode?.trim() || null,
     },
   });
 

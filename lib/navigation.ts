@@ -5,6 +5,7 @@ import {
   Inbox,
   LayoutDashboard,
   Mail,
+  ScanBarcode,
   Settings,
   ShoppingBag,
   type LucideIcon,
@@ -59,6 +60,13 @@ export const primaryNav: NavSection[] = [
         icon: Inbox,
         description: "Solicitudes internas de hardware",
         shortcut: "G P",
+      },
+      {
+        label: "Escaneo",
+        href: "/scan",
+        icon: ScanBarcode,
+        description: "Cargá altas y bajas con la pistola",
+        shortcut: "G E",
       },
       {
         label: "Reporte mensual",

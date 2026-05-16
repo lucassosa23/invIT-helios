@@ -43,6 +43,7 @@ export function assetFromDb(a: DbAsset): Asset {
     status: STATUS_FROM_DB[a.status],
     updatedAt: a.updatedAt,
     dismissedFromAutoPlan: a.dismissedFromAutoPlan,
+    barcode: a.barcode ?? undefined,
   };
 }
 

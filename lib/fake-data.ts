@@ -39,6 +39,7 @@ export type Asset = {
   status: Status;
   updatedAt: Date;
   dismissedFromAutoPlan?: boolean;
+  barcode?: string;
 };
 
 export type RequestItem = {
