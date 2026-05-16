@@ -1,14 +1,14 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/current-user";
 import { statusFromStock } from "@/lib/fake-data";
+import { idSchema, parseId, revalidateDomainPaths } from "@/lib/helpers";
 import { prisma } from "@/lib/prisma";
 import { statusToDb as assetStatusToDb } from "@/features/inventory/lib/mappers";
 
-import { priorityToDb, requestStatusToDb } from "./mappers";
+import { priorityToDb } from "./mappers";
 
 // ============================================================
 // Schemas
@@ -18,7 +18,7 @@ const requestInputSchema = z.object({
   requesterName: z.string().min(1).max(200),
   requesterTeam: z.string().max(100).default(""),
   itemName: z.string().min(1).max(200),
-  assetId: z.string().nullish(),
+  assetId: idSchema.nullish(),
   brand: z.string().max(100).default(""),
   category: z.string().min(1).max(100),
   qty: z.number().int().min(1),
@@ -31,14 +31,6 @@ export type RequestInput = z.input<typeof requestInputSchema>;
 // ============================================================
 // Helpers
 // ============================================================
-
-function revalidateAll() {
-  revalidatePath("/requests");
-  revalidatePath("/procurement");
-  revalidatePath("/dashboard");
-  revalidatePath("/inventory");
-  revalidatePath("/reports");
-}
 
 async function nextRequestReference(): Promise<string> {
   const year = new Date().getFullYear();
@@ -84,7 +76,7 @@ export async function createRequestAction(
     },
   });
 
-  revalidateAll();
+  revalidateDomainPaths();
   return { id: req.id, reference: req.reference };
 }
 
@@ -93,10 +85,11 @@ export async function updateRequestAction(
   input: RequestInput,
 ): Promise<void> {
   await requireUser();
+  const requestId = parseId(id, "requestId");
   const data = requestInputSchema.parse(input);
 
   await prisma.internalRequest.update({
-    where: { id },
+    where: { id: requestId },
     data: {
       requesterName: data.requesterName.trim(),
       requesterTeam: data.requesterTeam.trim(),
@@ -110,13 +103,14 @@ export async function updateRequestAction(
     },
   });
 
-  revalidateAll();
+  revalidateDomainPaths();
 }
 
 export async function deleteRequestAction(id: string): Promise<void> {
   await requireUser();
-  await prisma.internalRequest.delete({ where: { id } });
-  revalidateAll();
+  const requestId = parseId(id, "requestId");
+  await prisma.internalRequest.delete({ where: { id: requestId } });
+  revalidateDomainPaths();
 }
 
 // ============================================================
@@ -128,22 +122,24 @@ export async function linkRequestAssetAction(
   assetId: string,
 ): Promise<void> {
   await requireUser();
+  const safeRequestId = parseId(requestId, "requestId");
+  const safeAssetId = parseId(assetId, "assetId");
   const asset = await prisma.asset.findUniqueOrThrow({
-    where: { id: assetId },
+    where: { id: safeAssetId },
     select: { name: true, brand: true, category: true },
   });
 
   await prisma.internalRequest.update({
-    where: { id: requestId },
+    where: { id: safeRequestId },
     data: {
-      assetId,
+      assetId: safeAssetId,
       itemName: asset.name,
       brand: asset.brand,
       category: asset.category,
     },
   });
 
-  revalidateAll();
+  revalidateDomainPaths();
 }
 
 // ============================================================
@@ -152,11 +148,12 @@ export async function linkRequestAssetAction(
 
 export async function markRequestReadyAction(id: string): Promise<void> {
   await requireUser();
+  const requestId = parseId(id, "requestId");
   await prisma.internalRequest.update({
-    where: { id },
+    where: { id: requestId },
     data: { status: "READY_TO_DELIVER" },
   });
-  revalidateAll();
+  revalidateDomainPaths();
 }
 
 export async function rejectRequestAction(
@@ -164,15 +161,31 @@ export async function rejectRequestAction(
   reason?: string,
 ): Promise<void> {
   await requireUser();
+  const requestId = parseId(id, "requestId");
   await prisma.internalRequest.update({
-    where: { id },
+    where: { id: requestId },
     data: {
       status: "REJECTED",
       rejectedAt: new Date(),
       rejectionReason: reason?.trim() || null,
+      linkedOrderId: null,
     },
   });
-  revalidateAll();
+  revalidateDomainPaths();
+}
+
+export async function reactivateRequestAction(id: string): Promise<void> {
+  await requireUser();
+  const requestId = parseId(id, "requestId");
+  await prisma.internalRequest.update({
+    where: { id: requestId },
+    data: {
+      status: "PENDING",
+      rejectedAt: null,
+      rejectionReason: null,
+    },
+  });
+  revalidateDomainPaths();
 }
 
 /** Entrega un request ready_to_deliver: descuenta stock, marca delivered,
@@ -181,9 +194,10 @@ export async function deliverRequestAction(
   id: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const user = await requireUser();
+  const requestId = parseId(id, "requestId");
 
   return await prisma.$transaction(async (tx) => {
-    const req = await tx.internalRequest.findUnique({ where: { id } });
+    const req = await tx.internalRequest.findUnique({ where: { id: requestId } });
     if (!req) return { ok: false as const, reason: "Pedido no encontrado." };
     if (req.status !== "READY_TO_DELIVER") {
       return {
@@ -240,13 +254,94 @@ export async function deliverRequestAction(
     });
 
     await tx.internalRequest.update({
-      where: { id },
+      where: { id: requestId },
       data: { status: "DELIVERED", deliveredAt: now },
     });
 
     return { ok: true as const };
   }).then((result) => {
-    if (result.ok) revalidateAll();
+    if (result.ok) revalidateDomainPaths();
+    return result;
+  });
+}
+
+/** Entrega un request vinculándolo al asset elegido en el mismo paso.
+ *  Útil cuando el usuario abre el picker desde un pedido sin assetId. */
+export async function deliverRequestWithAssetAction(
+  id: string,
+  assetId: string,
+): Promise<{ ok: true; remainingStock: number } | { ok: false; reason: string }> {
+  const user = await requireUser();
+  const requestId = parseId(id, "requestId");
+  const safeAssetId = parseId(assetId, "assetId");
+
+  return await prisma.$transaction(async (tx) => {
+    const req = await tx.internalRequest.findUnique({ where: { id: requestId } });
+    if (!req) return { ok: false as const, reason: "Pedido no encontrado." };
+    if (req.status === "DELIVERED" || req.status === "REJECTED") {
+      return {
+        ok: false as const,
+        reason: "El pedido ya está cerrado.",
+      };
+    }
+
+    const asset = await tx.asset.findUnique({
+      where: { id: safeAssetId },
+      select: { name: true, brand: true, category: true, stock: true, threshold: true },
+    });
+    if (!asset) {
+      return { ok: false as const, reason: "El item ya no existe." };
+    }
+    if (asset.stock < req.qty) {
+      return {
+        ok: false as const,
+        reason: `Stock insuficiente (${asset.stock}/${req.qty}).`,
+      };
+    }
+
+    const nextStock = asset.stock - req.qty;
+    const now = new Date();
+
+    await tx.asset.update({
+      where: { id: safeAssetId },
+      data: {
+        stock: nextStock,
+        status: assetStatusToDb(statusFromStock(nextStock, asset.threshold)),
+        updatedAt: now,
+      },
+    });
+
+    await tx.movement.create({
+      data: {
+        assetId: safeAssetId,
+        type: "OUT",
+        qty: req.qty,
+        delta: -req.qty,
+        sourceKind: "REQUEST_DELIVER",
+        sourceRef: req.id,
+        actorId: user.id,
+        note: `Entrega ${req.reference} · ${req.requesterName}`,
+        prevStock: asset.stock,
+        nextStock,
+      },
+    });
+
+    await tx.internalRequest.update({
+      where: { id: requestId },
+      data: {
+        assetId: safeAssetId,
+        itemName: asset.name,
+        brand: asset.brand,
+        category: asset.category,
+        status: "DELIVERED",
+        approvedAt: req.approvedAt ?? now,
+        deliveredAt: now,
+      },
+    });
+
+    return { ok: true as const, remainingStock: nextStock };
+  }).then((result) => {
+    if (result.ok) revalidateDomainPaths();
     return result;
   });
 }
@@ -263,18 +358,20 @@ export async function syncOrderRequestLinksAction(
   requestIds: string[],
 ): Promise<{ linked: number; unlinked: number }> {
   await requireUser();
-  const idsSet = new Set(requestIds);
+  const safeOrderId = parseId(orderId, "orderId");
+  const safeRequestIds = z.array(idSchema).parse(requestIds);
+  const idsSet = new Set(safeRequestIds);
 
   return await prisma.$transaction(async (tx) => {
     // Los que ya están vinculados a esta orden
     const currentlyLinked = await tx.internalRequest.findMany({
-      where: { linkedOrderId: orderId },
+      where: { linkedOrderId: safeOrderId },
       select: { id: true, status: true },
     });
     const currentlyLinkedIds = new Set(currentlyLinked.map((r) => r.id));
 
     // A linkear: ids nuevos en la lista
-    const toLink = requestIds.filter((id) => !currentlyLinkedIds.has(id));
+    const toLink = safeRequestIds.filter((id) => !currentlyLinkedIds.has(id));
     // A desvincular: ids que estaban pero ya no están
     const toUnlink = currentlyLinked
       .filter((r) => !idsSet.has(r.id))
@@ -287,7 +384,7 @@ export async function syncOrderRequestLinksAction(
       const res = await tx.internalRequest.updateMany({
         where: { id: { in: toLink } },
         data: {
-          linkedOrderId: orderId,
+          linkedOrderId: safeOrderId,
           status: "AWAITING_PURCHASE",
           approvedAt: new Date(),
         },
@@ -308,7 +405,7 @@ export async function syncOrderRequestLinksAction(
 
     return { linked, unlinked };
   }).then((result) => {
-    revalidateAll();
+    revalidateDomainPaths();
     return result;
   });
 }
@@ -368,7 +465,7 @@ export async function reconcileAwaitingRequestsAction(): Promise<number> {
     flipped++;
   }
 
-  if (flipped > 0) revalidateAll();
+  if (flipped > 0) revalidateDomainPaths();
   return flipped;
 }
 
@@ -377,10 +474,11 @@ export async function cascadeRequestsOnOrderCancelledAction(
   orderId: string,
 ): Promise<number> {
   await requireUser();
+  const safeOrderId = parseId(orderId, "orderId");
   const res = await prisma.internalRequest.updateMany({
-    where: { linkedOrderId: orderId, status: "AWAITING_PURCHASE" },
+    where: { linkedOrderId: safeOrderId, status: "AWAITING_PURCHASE" },
     data: { linkedOrderId: null, status: "PENDING", approvedAt: null },
   });
-  if (res.count > 0) revalidateAll();
+  if (res.count > 0) revalidateDomainPaths();
   return res.count;
 }

@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { stockTone } from "@/lib/format";
 import type { Asset } from "@/lib/fake-data";
 import { useInventory } from "@/lib/hooks";
 
@@ -24,14 +25,6 @@ type Props = {
   request: InternalRequest | null;
   onPick: (asset: Asset) => void;
 };
-
-function stockTone(status: Asset["status"]) {
-  return status === "healthy"
-    ? "bg-status-healthy-soft text-status-healthy ring-status-healthy/30"
-    : status === "low"
-      ? "bg-status-low-soft text-status-low ring-status-low/30"
-      : "bg-status-critical-soft text-status-critical ring-status-critical/30";
-}
 
 export function AssetPickerDialog({
   open,

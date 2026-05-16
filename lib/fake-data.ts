@@ -38,6 +38,7 @@ export type Asset = {
   warrantyExpiresAt: Date;
   status: Status;
   updatedAt: Date;
+  dismissedFromAutoPlan?: boolean;
 };
 
 export type RequestItem = {

@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatRelative } from "@/lib/format";
 
-import { useOrders } from "../lib/use-orders";
 import {
   isMonthlyPlan,
   STATUS_LABEL,
@@ -26,9 +25,11 @@ import {
 } from "../lib/orders";
 import { ReceiveOrderDialog } from "./receive-order-dialog";
 
-export function OurPurchasesSection() {
-  const { orders, hydrated } = useOrders();
+type Props = {
+  orders: PurchaseOrder[];
+};
 
+export function OurPurchasesSection({ orders }: Props) {
   const inFlight = useMemo(
     () =>
       orders
@@ -43,7 +44,7 @@ export function OurPurchasesSection() {
     [orders],
   );
 
-  if (!hydrated || inFlight.length === 0) return null;
+  if (inFlight.length === 0) return null;
 
   const awaiting = inFlight.filter(
     (o) => o.status === "ordered" || o.status === "received_partial",

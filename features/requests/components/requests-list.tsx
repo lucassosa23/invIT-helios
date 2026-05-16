@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   BoxesIcon,
   Check,
@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatRelative } from "@/lib/format";
-import { loadInventory } from "@/lib/storage";
+import { useInventory } from "@/lib/hooks";
 import type { Asset } from "@/lib/fake-data";
 
 import {
@@ -29,12 +29,15 @@ import {
   type InternalRequest,
   type RequestStatus,
 } from "../lib/requests";
+import { approveRequestToPurchaseAction } from "@/features/procurement/lib/monthly-plan-actions";
 import {
-  applyDeliveryToInventory,
-  approveRequestToPurchase,
-  loadRequests,
-  saveRequests,
-} from "../lib/requests-storage";
+  deliverRequestAction,
+  deliverRequestWithAssetAction,
+  linkRequestAssetAction,
+  markRequestReadyAction,
+  reactivateRequestAction,
+  rejectRequestAction,
+} from "../lib/actions";
 import { AssetPickerDialog } from "./asset-picker-dialog";
 
 type Props = {
@@ -68,6 +71,7 @@ export function RequestsList({ requests, hydrated, onEdit, onCreate }: Props) {
     request: InternalRequest;
     intent: PickerIntent;
   } | null>(null);
+  const [, startTransition] = useTransition();
 
   const visible = useMemo(() => {
     if (filter === "active")
@@ -98,40 +102,35 @@ export function RequestsList({ requests, hydrated, onEdit, onCreate }: Props) {
   const handlePicked = (asset: Asset) => {
     if (!picker) return;
     const { request, intent } = picker;
-    const all = loadRequests();
-    const updatedRequest: InternalRequest = {
-      ...request,
-      assetId: asset.id,
-      status: "ready_to_deliver",
-      approvedAt: request.approvedAt ?? new Date(),
-    };
-    const next = all.map((r) => (r.id === request.id ? updatedRequest : r));
-    saveRequests(next);
+    setPicker(null);
 
     if (intent === "deliver") {
-      // Continuar con la entrega usando el asset recién vinculado
-      const res = applyDeliveryToInventory(updatedRequest);
-      if (!res.ok) {
-        toast.error("No se pudo entregar", { description: res.reason });
-        setPicker(null);
-        return;
-      }
-      const now = new Date();
-      const finalRequests = loadRequests().map((r) =>
-        r.id === request.id
-          ? { ...r, status: "delivered" as RequestStatus, deliveredAt: now }
-          : r,
-      );
-      saveRequests(finalRequests);
-      toast.success("Entregado e inventario actualizado", {
-        description: `${request.reference} · ${asset.name} · queda ${res.remainingStock}`,
+      startTransition(async () => {
+        const res = await deliverRequestWithAssetAction(request.id, asset.id);
+        if (!res.ok) {
+          toast.error("No se pudo entregar", { description: res.reason });
+          return;
+        }
+        toast.success("Entregado e inventario actualizado", {
+          description: `${request.reference} · ${asset.name} · queda ${res.remainingStock}`,
+        });
       });
-    } else {
-      toast.success("Vinculado al stock", {
-        description: `${request.reference} → ${asset.name} (${asset.stock} en stock)`,
-      });
+      return;
     }
-    setPicker(null);
+
+    startTransition(async () => {
+      try {
+        await linkRequestAssetAction(request.id, asset.id);
+        await markRequestReadyAction(request.id);
+        toast.success("Vinculado al stock", {
+          description: `${request.reference} → ${asset.name} (${asset.stock} en stock)`,
+        });
+      } catch (err) {
+        toast.error("No se pudo vincular", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   };
 
   if (!hydrated) {
@@ -244,87 +243,80 @@ function RequestRow({
   onRequestPicker: (intent: "link" | "deliver") => void;
 }) {
   const tone = STATUS_TONE[request.status];
+  const [pending, startTransition] = useTransition();
+  const inventory = useInventory();
 
   const approve = () => {
-    const inventory = loadInventory() ?? [];
     const asset = request.assetId
       ? inventory.find((a) => a.id === request.assetId)
       : undefined;
     const stock = asset?.stock ?? 0;
 
     if (asset && stock >= request.qty) {
-      // Hay stock → ready_to_deliver
-      const all = loadRequests();
-      const next = all.map((x) =>
-        x.id === request.id
-          ? {
-              ...x,
-              status: "ready_to_deliver" as RequestStatus,
-              approvedAt: x.approvedAt ?? new Date(),
-            }
-          : x,
-      );
-      saveRequests(next);
-      toast.success("Pedido aprobado · listo para entregar", {
-        description: `${request.reference} · stock alcanza (${stock} disponibles)`,
+      startTransition(async () => {
+        try {
+          await markRequestReadyAction(request.id);
+          toast.success("Pedido aprobado · listo para entregar", {
+            description: `${request.reference} · stock alcanza (${stock} disponibles)`,
+          });
+        } catch (err) {
+          toast.error("No se pudo aprobar", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+        }
       });
       return;
     }
 
-    // No hay stock o no es del catálogo → awaiting_purchase + vincular a PO
-    const { orderReference } = approveRequestToPurchase(request);
-    toast.success("Pedido aprobado · sumado a la compra del mes", {
-      description: `${request.reference} → ${orderReference}`,
+    startTransition(async () => {
+      try {
+        const { orderReference } = await approveRequestToPurchaseAction(
+          request.id,
+        );
+        toast.success("Pedido aprobado · sumado a la compra del mes", {
+          description: `${request.reference} → ${orderReference}`,
+        });
+      } catch (err) {
+        toast.error("No se pudo aprobar", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
     });
   };
 
   const deliver = () => {
     if (!canTransition(request.status, "delivered")) return;
-    // Si el pedido no tiene assetId (ad-hoc sin match auto), abrir picker
-    // para que el usuario elija a qué item del stock corresponde.
     if (!request.assetId) {
       onRequestPicker("deliver");
       return;
     }
-    const res = applyDeliveryToInventory(request);
-    if (!res.ok) {
-      toast.error("No se pudo entregar", { description: res.reason });
-      return;
-    }
-    const all = loadRequests();
-    const now = new Date();
-    const next = all.map((x) =>
-      x.id === request.id
-        ? { ...x, status: "delivered" as RequestStatus, deliveredAt: now }
-        : x,
-    );
-    saveRequests(next);
-    toast.success("Entregado e inventario actualizado", {
-      description: `${request.reference} · -${request.qty} ${request.itemName} · queda ${res.remainingStock}`,
+    startTransition(async () => {
+      const res = await deliverRequestAction(request.id);
+      if (!res.ok) {
+        toast.error("No se pudo entregar", { description: res.reason });
+        return;
+      }
+      toast.success("Entregado e inventario actualizado", {
+        description: `${request.reference} · -${request.qty} ${request.itemName}`,
+      });
     });
   };
 
   const reject = () => {
     if (!canTransition(request.status, "rejected")) return;
-    const all = loadRequests();
-    const now = new Date();
-    const next = all.map((x) =>
-      x.id === request.id
-        ? {
-            ...x,
-            status: "rejected" as RequestStatus,
-            rejectedAt: now,
-            linkedOrderId: undefined,
-          }
-        : x,
-    );
-    saveRequests(next);
-    toast(`${request.reference} rechazado`);
+    startTransition(async () => {
+      try {
+        await rejectRequestAction(request.id);
+        toast(`${request.reference} rechazado`);
+      } catch (err) {
+        toast.error("No se pudo rechazar", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   };
 
   const markReadyManually = () => {
-    // Intentar auto-match primero
-    const inventory = loadInventory() ?? [];
     const want = request.itemName.trim().toLowerCase();
     const brand = request.brand.trim().toLowerCase();
     const autoMatch = request.assetId
@@ -336,42 +328,38 @@ function RequestRow({
         });
 
     if (autoMatch) {
-      const all = loadRequests();
-      const next = all.map((x) =>
-        x.id === request.id
-          ? {
-              ...x,
-              status: "ready_to_deliver" as RequestStatus,
-              assetId: autoMatch.id,
-              approvedAt: x.approvedAt ?? new Date(),
-            }
-          : x,
-      );
-      saveRequests(next);
-      toast.success("Vinculado al stock", {
-        description: `${request.reference} → ${autoMatch.name} (${autoMatch.stock} en stock)`,
+      startTransition(async () => {
+        try {
+          if (autoMatch.id !== request.assetId) {
+            await linkRequestAssetAction(request.id, autoMatch.id);
+          }
+          await markRequestReadyAction(request.id);
+          toast.success("Vinculado al stock", {
+            description: `${request.reference} → ${autoMatch.name} (${autoMatch.stock} en stock)`,
+          });
+        } catch (err) {
+          toast.error("No se pudo vincular", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+        }
       });
       return;
     }
 
-    // No hay auto-match → abrir picker
     onRequestPicker("link");
   };
 
   const reactivate = () => {
-    const all = loadRequests();
-    const next = all.map((x) =>
-      x.id === request.id
-        ? {
-            ...x,
-            status: "pending" as RequestStatus,
-            rejectedAt: undefined,
-            rejectionReason: undefined,
-          }
-        : x,
-    );
-    saveRequests(next);
-    toast.info(`${request.reference} reactivado como pendiente`);
+    startTransition(async () => {
+      try {
+        await reactivateRequestAction(request.id);
+        toast.info(`${request.reference} reactivado como pendiente`);
+      } catch (err) {
+        toast.error("No se pudo reactivar", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   };
 
   const initials = request.requesterName
@@ -453,6 +441,7 @@ function RequestRow({
               size="xs"
               variant="ghost"
               onClick={() => onEdit(request)}
+              disabled={pending}
               className="text-muted-foreground hover:text-foreground"
               aria-label="Editar"
             >
@@ -463,12 +452,13 @@ function RequestRow({
               size="xs"
               variant="ghost"
               onClick={reject}
+              disabled={pending}
               className="text-muted-foreground hover:bg-status-critical/15 hover:text-status-critical"
             >
               <XIcon className="size-3.5" />
               Rechazar
             </Button>
-            <Button type="button" size="xs" onClick={approve}>
+            <Button type="button" size="xs" onClick={approve} disabled={pending}>
               <Check className="size-3.5" />
               Aprobar
             </Button>
@@ -482,6 +472,7 @@ function RequestRow({
               size="xs"
               variant="ghost"
               onClick={reject}
+              disabled={pending}
               className="text-muted-foreground hover:bg-status-critical/15 hover:text-status-critical"
             >
               <XIcon className="size-3.5" />
@@ -492,6 +483,7 @@ function RequestRow({
               size="xs"
               variant="outline"
               onClick={markReadyManually}
+              disabled={pending}
               title="Si ya tenés el item en stock, marcalo como listo"
             >
               <BoxesIcon className="size-3.5" />
@@ -507,12 +499,13 @@ function RequestRow({
               size="xs"
               variant="ghost"
               onClick={reject}
+              disabled={pending}
               className="text-muted-foreground hover:bg-status-critical/15 hover:text-status-critical"
             >
               <XIcon className="size-3.5" />
               Rechazar
             </Button>
-            <Button type="button" size="xs" onClick={deliver}>
+            <Button type="button" size="xs" onClick={deliver} disabled={pending}>
               <PackageCheck className="size-3.5" />
               Entregar
             </Button>
@@ -525,6 +518,7 @@ function RequestRow({
             size="xs"
             variant="ghost"
             onClick={reactivate}
+            disabled={pending}
             className="text-muted-foreground hover:text-foreground"
           >
             <Undo2 className="size-3.5" />

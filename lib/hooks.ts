@@ -2,20 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import {
-  getInventorySnapshot,
-  getServerInventorySnapshot,
-  subscribeInventory,
-} from "@/lib/storage";
-import type { Asset } from "@/lib/fake-data";
-
-export function useInventory(): Asset[] {
-  return useSyncExternalStore(
-    subscribeInventory,
-    getInventorySnapshot,
-    getServerInventorySnapshot,
-  );
-}
+export { useInventory } from "@/lib/inventory-context";
 
 const noopSubscribe = () => () => {};
 

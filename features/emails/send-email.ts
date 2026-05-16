@@ -3,6 +3,8 @@
 import { headers } from "next/headers";
 import { z } from "zod";
 
+import { requireUser } from "@/lib/auth/current-user";
+
 const attachmentSchema = z.object({
   filename: z.string().min(1).max(200),
   content: z.string().min(1).max(5_000_000),
@@ -46,6 +48,7 @@ function rateLimit(key: string): boolean {
 export async function sendEmail(
   raw: SendEmailInput,
 ): Promise<SendEmailResult> {
+  await requireUser();
   const apiKey = process.env.RESEND_API_KEY;
   const fromAddress =
     process.env.RESEND_FROM ?? "invIT <onboarding@resend.dev>";

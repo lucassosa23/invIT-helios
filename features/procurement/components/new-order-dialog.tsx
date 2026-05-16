@@ -40,7 +40,6 @@ import {
   type PurchaseOrder,
   type PurchaseOrderStatus,
 } from "../lib/orders";
-import { loadOrders } from "../lib/orders-storage";
 import {
   createOrderAction,
   updateOrderAction,
@@ -50,19 +49,50 @@ import {
   PRIORITY_TONE,
   type InternalRequest,
 } from "@/features/requests/lib/requests";
-import { loadRequests } from "@/features/requests/lib/requests-storage";
 import { syncOrderRequestLinksAction } from "@/features/requests/lib/actions";
-import {
-  findActiveOrderForAsset,
-  loadDismissed,
-  markDismissed,
-  markUndismissed,
-} from "../lib/monthly-plan";
+import { setAssetDismissedAction } from "@/features/inventory/lib/actions";
+
+type AssetInOrder = {
+  orderId: string;
+  reference: string;
+  status: PurchaseOrderStatus;
+  monthYear: string;
+  qty: number;
+};
+
+function findActiveOrderForAssetIn(
+  orders: PurchaseOrder[],
+  assetId: string,
+  excludeOrderId?: string,
+): AssetInOrder | undefined {
+  const sorted = [...orders].sort(
+    (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
+  );
+  for (const o of sorted) {
+    if (o.status === "received" || o.status === "cancelled") continue;
+    if (excludeOrderId && o.id === excludeOrderId) continue;
+    const line = o.lines.find((l) => l.assetId === assetId);
+    if (!line) continue;
+    const monthYear = o.createdAt
+      .toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+      .replace(/^./, (c) => c.toUpperCase());
+    return {
+      orderId: o.id,
+      reference: o.reference,
+      status: o.status,
+      monthYear,
+      qty: line.qty,
+    };
+  }
+  return undefined;
+}
 
 type Props = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   editing?: PurchaseOrder | null;
+  orders: PurchaseOrder[];
+  requests: InternalRequest[];
 };
 
 function lineFromAsset(a: Asset, qty: number): OrderLine {
@@ -109,9 +139,10 @@ function requestIdFromLine(line: OrderLine): string | null {
 }
 
 function computeOpenRequests(
+  requests: InternalRequest[],
   editing: PurchaseOrder | null,
 ): InternalRequest[] {
-  return loadRequests().filter(
+  return requests.filter(
     (r) =>
       r.status === "pending" ||
       (!!editing &&
@@ -121,10 +152,11 @@ function computeOpenRequests(
 }
 
 function computeActiveOrderAssetIds(
+  orders: PurchaseOrder[],
   editing: PurchaseOrder | null,
 ): Set<string> {
   const ids = new Set<string>();
-  for (const o of loadOrders()) {
+  for (const o of orders) {
     if (o.status === "received" || o.status === "cancelled") continue;
     if (editing && o.id === editing.id) continue;
     for (const l of o.lines) {
@@ -134,7 +166,13 @@ function computeActiveOrderAssetIds(
   return ids;
 }
 
-export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
+export function NewOrderDialog({
+  open,
+  onOpenChange,
+  editing,
+  orders,
+  requests,
+}: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -144,6 +182,8 @@ export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
         {open && (
           <NewOrderBody
             editing={editing ?? null}
+            orders={orders}
+            requests={requests}
             onClose={() => onOpenChange(false)}
           />
         )}
@@ -154,21 +194,29 @@ export function NewOrderDialog({ open, onOpenChange, editing }: Props) {
 
 function NewOrderBody({
   editing,
+  orders,
+  requests,
   onClose,
 }: {
   editing: PurchaseOrder | null;
+  orders: PurchaseOrder[];
+  requests: InternalRequest[];
   onClose: () => void;
 }) {
   const inventory = useInventory();
 
   const [openRequests] = useState<InternalRequest[]>(() =>
-    computeOpenRequests(editing),
+    computeOpenRequests(requests, editing),
   );
-  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() =>
-    loadDismissed(),
+  const dismissedIds = useMemo(
+    () =>
+      new Set(
+        inventory.filter((a) => a.dismissedFromAutoPlan).map((a) => a.id),
+      ),
+    [inventory],
   );
   const [activeOrderAssetIds] = useState<Set<string>>(() =>
-    computeActiveOrderAssetIds(editing),
+    computeActiveOrderAssetIds(orders, editing),
   );
 
   const [lines, setLines] = useState<OrderLine[]>(() =>
@@ -363,7 +411,7 @@ function NewOrderBody({
       );
       for (const id of originalAssetIds) {
         if (!currentAssetIds.has(id)) {
-          markDismissed(id);
+          await setAssetDismissedAction(id, true);
           dismissedCount++;
         }
       }
@@ -532,7 +580,11 @@ function NewOrderBody({
                       {openRequests.map((r) => {
                         const linked = linkedRequestIds.has(r.id);
                         const inOrder = r.assetId
-                          ? findActiveOrderForAsset(r.assetId, editing?.id)
+                          ? findActiveOrderForAssetIn(
+                              orders,
+                              r.assetId,
+                              editing?.id,
+                            )
                           : undefined;
                         return (
                           <li
@@ -639,6 +691,7 @@ function NewOrderBody({
                         <AlreadyCoveredSection
                           items={suggestions.alreadyCovered}
                           editingOrderId={editing?.id}
+                          orders={orders}
                         />
                       )}
                     </div>
@@ -656,6 +709,7 @@ function NewOrderBody({
                           onAddAll={addBulkCritical}
                           existingIds={linesAssetIds}
                           excludeOrderId={editing?.id}
+                          orders={orders}
                         />
                       )}
                       {suggestions.low.length > 0 && (
@@ -668,6 +722,7 @@ function NewOrderBody({
                           onAddAll={addBulkLow}
                           existingIds={linesAssetIds}
                           excludeOrderId={editing?.id}
+                          orders={orders}
                         />
                       )}
                       {suggestions.dismissed.length > 0 && (
@@ -675,16 +730,25 @@ function NewOrderBody({
                           items={suggestions.dismissed}
                           existingIds={linesAssetIds}
                           excludeOrderId={editing?.id}
+                          orders={orders}
                           onAdd={(a) => addAsset(a)}
-                          onReactivate={(a) => {
-                            markUndismissed(a.id);
-                            setDismissedIds(loadDismissed());
-                            toast.success(
-                              "Reactivado en el plan automático",
-                              {
-                                description: `${a.name} va a volver a aparecer solo cuando esté bajo umbral.`,
-                              },
-                            );
+                          onReactivate={async (a) => {
+                            try {
+                              await setAssetDismissedAction(a.id, false);
+                              toast.success(
+                                "Reactivado en el plan automático",
+                                {
+                                  description: `${a.name} va a volver a aparecer solo cuando esté bajo umbral.`,
+                                },
+                              );
+                            } catch (err) {
+                              toast.error("No se pudo reactivar", {
+                                description:
+                                  err instanceof Error
+                                    ? err.message
+                                    : String(err),
+                              });
+                            }
                           }}
                         />
                       )}
@@ -692,6 +756,7 @@ function NewOrderBody({
                         <AlreadyCoveredSection
                           items={suggestions.alreadyCovered}
                           editingOrderId={editing?.id}
+                          orders={orders}
                         />
                       )}
                     </div>
@@ -1031,6 +1096,7 @@ function SuggestionGroup({
   onAddAll,
   existingIds,
   excludeOrderId,
+  orders,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -1040,6 +1106,7 @@ function SuggestionGroup({
   onAddAll: () => void;
   existingIds: Set<string | undefined>;
   excludeOrderId?: string;
+  orders: PurchaseOrder[];
 }) {
   return (
     <div className="rounded-lg bg-background/60 ring-1 ring-foreground/[0.05]">
@@ -1065,7 +1132,11 @@ function SuggestionGroup({
         {items.slice(0, 6).map((a) => {
           const existing = existingIds.has(a.id);
           const suggested = Math.max(1, a.threshold - a.stock || a.threshold);
-          const inOrder = findActiveOrderForAsset(a.id, excludeOrderId);
+          const inOrder = findActiveOrderForAssetIn(
+            orders,
+            a.id,
+            excludeOrderId,
+          );
           return (
             <li
               key={a.id}
@@ -1128,9 +1199,11 @@ function SuggestionGroup({
 function AlreadyCoveredSection({
   items,
   editingOrderId,
+  orders,
 }: {
   items: Asset[];
   editingOrderId?: string;
+  orders: PurchaseOrder[];
 }) {
   return (
     <div className="rounded-lg bg-card/60 px-3 py-3 ring-1 ring-foreground/10">
@@ -1147,7 +1220,11 @@ function AlreadyCoveredSection({
       </p>
       <ul className="grid gap-1">
         {items.slice(0, 8).map((a) => {
-          const inOrder = findActiveOrderForAsset(a.id, editingOrderId);
+          const inOrder = findActiveOrderForAssetIn(
+            orders,
+            a.id,
+            editingOrderId,
+          );
           return (
             <li
               key={a.id}
@@ -1187,12 +1264,14 @@ function DismissedSuggestionGroup({
   onAdd,
   onReactivate,
   excludeOrderId,
+  orders,
 }: {
   items: Asset[];
   existingIds: Set<string | undefined>;
   onAdd: (a: Asset) => void;
   onReactivate: (a: Asset) => void;
   excludeOrderId?: string;
+  orders: PurchaseOrder[];
 }) {
   return (
     <div className="rounded-lg bg-background/60 ring-1 ring-foreground/[0.05]">
@@ -1215,7 +1294,11 @@ function DismissedSuggestionGroup({
       <ul className="divide-y divide-border/30">
         {items.slice(0, 6).map((a) => {
           const existing = existingIds.has(a.id);
-          const inOrder = findActiveOrderForAsset(a.id, excludeOrderId);
+          const inOrder = findActiveOrderForAssetIn(
+            orders,
+            a.id,
+            excludeOrderId,
+          );
           return (
             <li
               key={a.id}

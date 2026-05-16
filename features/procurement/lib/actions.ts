@@ -1,10 +1,10 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/current-user";
 import { statusFromStock } from "@/lib/fake-data";
+import { idSchema, makeSku, parseId, revalidateDomainPaths } from "@/lib/helpers";
 import { prisma } from "@/lib/prisma";
 import { statusToDb as assetStatusToDb } from "@/features/inventory/lib/mappers";
 
@@ -20,7 +20,7 @@ import {
 // ============================================================
 
 const lineSchema = z.object({
-  assetId: z.string().nullish(),
+  assetId: idSchema.nullish(),
   name: z.string().min(1).max(200),
   brand: z.string().max(100).default(""),
   category: z.string().max(100).default("Otros"),
@@ -43,7 +43,7 @@ const orderInputSchema = z.object({
 });
 
 const shipmentSchema = z.object({
-  lineId: z.string(),
+  lineId: idSchema,
   qty: z.number().int().min(1),
 });
 
@@ -52,14 +52,6 @@ export type OrderInput = z.input<typeof orderInputSchema>;
 // ============================================================
 // Helpers
 // ============================================================
-
-function revalidateAll() {
-  revalidatePath("/procurement");
-  revalidatePath("/requests");
-  revalidatePath("/dashboard");
-  revalidatePath("/inventory");
-  revalidatePath("/reports");
-}
 
 async function nextOrderReference(): Promise<string> {
   const year = new Date().getFullYear();
@@ -75,13 +67,6 @@ async function nextOrderReference(): Promise<string> {
     if (!Number.isNaN(seq)) next = seq + 1;
   }
   return `${prefix}${String(next).padStart(4, "0")}`;
-}
-
-function makeAssetSku(category: string, brand: string): string {
-  const c = (category.slice(0, 3) || "NEW").toUpperCase();
-  const b = (brand.slice(0, 3) || "GEN").toUpperCase();
-  const rand = Math.random().toString(36).slice(-4).toUpperCase();
-  return `${c}-${b}-${rand}`;
 }
 
 // ============================================================
@@ -114,7 +99,7 @@ export async function createOrderAction(input: OrderInput): Promise<{ id: string
     },
   });
 
-  revalidateAll();
+  revalidateDomainPaths();
   return { id: order.id, reference: order.reference };
 }
 
@@ -123,13 +108,14 @@ export async function updateOrderAction(
   input: OrderInput,
 ): Promise<void> {
   await requireUser();
+  const orderId = parseId(id, "orderId");
   const data = orderInputSchema.parse(input);
 
   await prisma.$transaction([
     // El UI permite re-construir las líneas desde cero; reemplazamos todas.
-    prisma.orderLine.deleteMany({ where: { orderId: id } }),
+    prisma.orderLine.deleteMany({ where: { orderId } }),
     prisma.purchaseOrder.update({
-      where: { id },
+      where: { id: orderId },
       data: {
         status: statusToDb(data.status),
         note: data.note.trim() || null,
@@ -148,7 +134,7 @@ export async function updateOrderAction(
     }),
   ]);
 
-  revalidateAll();
+  revalidateDomainPaths();
 }
 
 export async function transitionOrderStatusAction(
@@ -156,9 +142,10 @@ export async function transitionOrderStatusAction(
   next: PurchaseOrderStatus,
 ): Promise<{ requestsReverted: number }> {
   await requireUser();
+  const orderId = parseId(id, "orderId");
 
   const current = await prisma.purchaseOrder.findUniqueOrThrow({
-    where: { id },
+    where: { id: orderId },
     select: { status: true },
   });
 
@@ -181,7 +168,7 @@ export async function transitionOrderStatusAction(
   }
 
   await prisma.purchaseOrder.update({
-    where: { id },
+    where: { id: orderId },
     data: {
       status: statusToDb(next),
       orderedAt: next === "ordered" ? new Date() : undefined,
@@ -191,10 +178,10 @@ export async function transitionOrderStatusAction(
   // Si cancelaste, los pedidos vinculados vuelven a pending.
   let requestsReverted = 0;
   if (next === "cancelled") {
-    requestsReverted = await cascadeRequestsOnOrderCancelledAction(id);
+    requestsReverted = await cascadeRequestsOnOrderCancelledAction(orderId);
   }
 
-  revalidateAll();
+  revalidateDomainPaths();
   return { requestsReverted };
 }
 
@@ -202,12 +189,13 @@ export async function deleteOrderAction(
   id: string,
 ): Promise<{ requestsReverted: number }> {
   await requireUser();
+  const orderId = parseId(id, "orderId");
   // Antes de borrar, revertimos requests vinculados (al borrar la
   // orden, InternalRequest.linkedOrderId queda NULL por SetNull,
   // pero el status se queda en awaiting_purchase huérfano).
-  const requestsReverted = await cascadeRequestsOnOrderCancelledAction(id);
-  await prisma.purchaseOrder.delete({ where: { id } });
-  revalidateAll();
+  const requestsReverted = await cascadeRequestsOnOrderCancelledAction(orderId);
+  await prisma.purchaseOrder.delete({ where: { id: orderId } });
+  revalidateDomainPaths();
   return { requestsReverted };
 }
 
@@ -241,6 +229,7 @@ export async function receiveOrderShipmentAction(
   shipments: ShipmentInput[],
 ): Promise<ReceiveResult> {
   const user = await requireUser();
+  const safeOrderId = parseId(orderId, "orderId");
   const parsed = shipments.map((s) => shipmentSchema.parse(s));
   if (parsed.length === 0) {
     return { ok: false, reason: "No marcaste cantidades para recibir." };
@@ -248,7 +237,7 @@ export async function receiveOrderShipmentAction(
 
   const result = await prisma.$transaction(async (tx) => {
     const order = await tx.purchaseOrder.findUnique({
-      where: { id: orderId },
+      where: { id: safeOrderId },
       include: { lines: true },
     });
     if (!order) return { ok: false as const, reason: "Orden no encontrada." };
@@ -307,7 +296,7 @@ export async function receiveOrderShipmentAction(
         // Primera entrega de una línea isNew → creamos el asset.
         const newAsset = await tx.asset.create({
           data: {
-            sku: makeAssetSku(line.category, line.brand),
+            sku: makeSku(line.category, line.brand),
             name: line.name,
             brand: line.brand,
             category: line.category || "Otros",
@@ -390,6 +379,6 @@ export async function receiveOrderShipmentAction(
   // Reconcilio requests awaiting_purchase cuyo stock ahora alcanza.
   const requestsFlipped = await reconcileAwaitingRequestsAction();
 
-  revalidateAll();
+  revalidateDomainPaths();
   return { ...result, requestsFlipped };
 }

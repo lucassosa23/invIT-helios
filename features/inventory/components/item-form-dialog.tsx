@@ -16,11 +16,6 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { Asset, Location } from "@/lib/fake-data";
-import {
-  isDismissed,
-  markDismissed,
-  markUndismissed,
-} from "@/features/procurement/lib/monthly-plan";
 
 export type ItemFormValues = {
   name: string;
@@ -29,6 +24,7 @@ export type ItemFormValues = {
   stock: number;
   threshold: number;
   locationId: string;
+  dismissedFromAutoPlan?: boolean;
 };
 
 type Props = {
@@ -98,7 +94,7 @@ function ItemFormBody({
       : { ...empty, locationId: locations[0]?.id ?? "" },
   );
   const [includeInAutoPlan, setIncludeInAutoPlan] = useState(() =>
-    editing ? !isDismissed(editing.id) : true,
+    editing ? !editing.dismissedFromAutoPlan : true,
   );
 
   const update = <K extends keyof ItemFormValues>(
@@ -109,10 +105,6 @@ function ItemFormBody({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!values.name.trim()) return;
-    if (editing) {
-      if (includeInAutoPlan) markUndismissed(editing.id);
-      else markDismissed(editing.id);
-    }
     onSubmit({
       ...values,
       name: values.name.trim(),
@@ -120,6 +112,7 @@ function ItemFormBody({
       category: values.category.trim() || "Otros",
       stock: Math.max(0, Math.floor(values.stock)),
       threshold: Math.max(1, Math.floor(values.threshold)),
+      dismissedFromAutoPlan: editing ? !includeInAutoPlan : undefined,
     });
   };
 

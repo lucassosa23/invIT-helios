@@ -8,37 +8,18 @@ import { primaryNav } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { ChevronsUpDown } from "lucide-react";
 import {
-  loadRequests,
-  subscribeRequests,
-} from "@/features/requests/lib/requests-storage";
-import {
   loadPreferences,
   subscribePreferences,
 } from "@/features/settings/lib/preferences";
 
-export function Sidebar() {
+type Props = {
+  pendingRequestsCount: number;
+};
+
+export function Sidebar({ pendingRequestsCount }: Props) {
   const pathname = usePathname();
-  const [pendingCount, setPendingCount] = useState(0);
   const [showBadges, setShowBadges] = useState(true);
   const [homeHref, setHomeHref] = useState("/dashboard");
-
-  // Badge dinámico de Pedidos = todos los pedidos activos (pendientes +
-  // esperando compra + listos para entregar). Entregados y rechazados
-  // no cuentan — esos viven en el historial.
-  useEffect(() => {
-    const compute = () => {
-      const all = loadRequests();
-      const active = all.filter(
-        (r) =>
-          r.status === "pending" ||
-          r.status === "awaiting_purchase" ||
-          r.status === "ready_to_deliver",
-      ).length;
-      setPendingCount(active);
-    };
-    compute();
-    return subscribeRequests(compute);
-  }, []);
 
   useEffect(() => {
     const compute = () => {
@@ -52,7 +33,8 @@ export function Sidebar() {
 
   const dynamicBadge = (href: string): string | number | undefined => {
     if (!showBadges) return undefined;
-    if (href === "/requests" && pendingCount > 0) return pendingCount;
+    if (href === "/requests" && pendingRequestsCount > 0)
+      return pendingRequestsCount;
     return undefined;
   };
 

@@ -14,6 +14,9 @@ import { NotificationsSection } from "@/features/settings/components/sections/no
 import { PreferencesSection } from "@/features/settings/components/sections/preferences-section";
 import { ProfileSection } from "@/features/settings/components/sections/profile-section";
 import { SecuritySection } from "@/features/settings/components/sections/security-section";
+import { getInventory } from "@/features/inventory/lib/queries";
+import { getOrders } from "@/features/procurement/lib/queries";
+import { getRequests } from "@/features/requests/lib/queries";
 
 type Params = { section: string };
 
@@ -28,28 +31,52 @@ export async function generateMetadata({
   return { title: `${meta.label} · Ajustes` };
 }
 
-const SECTIONS: Record<string, () => React.ReactNode> = {
-  general: () => <GeneralSection />,
-  branding: () => <BrandingSection />,
-  members: () => <MembersSection />,
-  categories: () => <CategoriesSection />,
-  inventory: () => <InventoryRulesSection />,
-  notifications: () => <NotificationsSection />,
-  audit: () => <AuditLogSection />,
-  profile: () => <ProfileSection />,
-  preferences: () => <PreferencesSection />,
-  security: () => <SecuritySection />,
-  data: () => <DataSection />,
-  danger: () => <DangerSection />,
-};
-
 export default async function SettingsSectionPage({
   params,
 }: {
   params: Promise<Params>;
 }) {
   const { section } = await params;
-  const renderer = SECTIONS[section];
-  if (!renderer) notFound();
-  return renderer();
+  if (!findSection(section)) notFound();
+
+  switch (section) {
+    case "general":
+      return <GeneralSection />;
+    case "branding":
+      return <BrandingSection />;
+    case "members":
+      return <MembersSection />;
+    case "categories":
+      return <CategoriesSection />;
+    case "inventory":
+      return <InventoryRulesSection />;
+    case "notifications":
+      return <NotificationsSection />;
+    case "audit":
+      return <AuditLogSection />;
+    case "profile":
+      return <ProfileSection />;
+    case "preferences":
+      return <PreferencesSection />;
+    case "security":
+      return <SecuritySection />;
+    case "danger":
+      return <DangerSection />;
+    case "data": {
+      const [inventory, orders, requests] = await Promise.all([
+        getInventory(),
+        getOrders(),
+        getRequests(),
+      ]);
+      return (
+        <DataSection
+          inventory={inventory}
+          orders={orders}
+          requests={requests}
+        />
+      );
+    }
+    default:
+      notFound();
+  }
 }

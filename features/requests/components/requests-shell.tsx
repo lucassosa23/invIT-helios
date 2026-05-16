@@ -6,15 +6,17 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import type { InternalRequest } from "../lib/requests";
+import type { PurchaseOrder } from "@/features/procurement/lib/orders";
 import { NewRequestDialog } from "./new-request-dialog";
 import { RequestsList } from "./requests-list";
 import { OurPurchasesSection } from "@/features/procurement/components/our-purchases-section";
 
 type Props = {
   requests: InternalRequest[];
+  orders: PurchaseOrder[];
 };
 
-export function RequestsShell({ requests }: Props) {
+export function RequestsShell({ requests, orders }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<InternalRequest | null>(null);
 
@@ -52,7 +54,7 @@ export function RequestsShell({ requests }: Props) {
         onCreate={openCreate}
       />
 
-      <OurPurchasesSection />
+      <OurPurchasesSection orders={orders} />
 
       <NewRequestDialog
         open={dialogOpen}

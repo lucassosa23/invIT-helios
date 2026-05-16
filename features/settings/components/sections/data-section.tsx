@@ -17,25 +17,31 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { logAudit } from "@/features/settings/lib/audit-log";
-import { loadOrders } from "@/features/procurement/lib/orders-storage";
-import { loadRequests } from "@/features/requests/lib/requests-storage";
-import { loadInventory } from "@/lib/storage";
+import type { Asset } from "@/lib/fake-data";
+import type { PurchaseOrder } from "@/features/procurement/lib/orders";
+import type { InternalRequest } from "@/features/requests/lib/requests";
 import { loadMembers } from "@/features/settings/lib/members";
 import { loadCategories } from "@/features/settings/lib/categories";
 import { loadWorkspace } from "@/features/settings/lib/workspace";
 import { SectionCard, SectionFooter, SectionHeader } from "../section-primitives";
 
-const PARTS = [
-  { key: "inventory", label: "Inventario", load: () => loadInventory() ?? [] },
-  { key: "orders", label: "Órdenes de compra", load: () => loadOrders() },
-  { key: "requests", label: "Pedidos internos", load: () => loadRequests() },
-  { key: "members", label: "Miembros", load: () => loadMembers() },
-  { key: "categories", label: "Categorías", load: () => loadCategories() },
-  { key: "workspace", label: "Workspace", load: () => loadWorkspace() },
-] as const;
+type Props = {
+  inventory: Asset[];
+  orders: PurchaseOrder[];
+  requests: InternalRequest[];
+};
 
-export function DataSection() {
+export function DataSection({ inventory, orders, requests }: Props) {
   const [busy, setBusy] = useState(false);
+
+  const parts = [
+    { key: "inventory", label: "Inventario", value: inventory },
+    { key: "orders", label: "Órdenes de compra", value: orders },
+    { key: "requests", label: "Pedidos internos", value: requests },
+    { key: "members", label: "Miembros", value: loadMembers() },
+    { key: "categories", label: "Categorías", value: loadCategories() },
+    { key: "workspace", label: "Workspace", value: loadWorkspace() },
+  ] as const;
 
   const exportAll = () => {
     setBusy(true);
@@ -44,8 +50,8 @@ export function DataSection() {
       workspace: loadWorkspace(),
       data: {} as Record<string, unknown>,
     };
-    for (const p of PARTS) {
-      (snapshot.data as Record<string, unknown>)[p.key] = p.load();
+    for (const p of parts) {
+      (snapshot.data as Record<string, unknown>)[p.key] = p.value;
     }
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
       type: "application/json",
@@ -64,7 +70,7 @@ export function DataSection() {
   };
 
   const exportInventoryCsv = () => {
-    const inv = loadInventory() ?? [];
+    const inv = inventory;
     if (inv.length === 0) {
       toast.error("No hay inventario para exportar.");
       return;
@@ -182,9 +188,8 @@ export function DataSection() {
           description="Tamaño de cada dataset en este workspace."
         />
         <ul className="divide-y divide-border/60">
-          {PARTS.map((p) => {
-            const data = p.load();
-            const count = Array.isArray(data) ? data.length : 1;
+          {parts.map((p) => {
+            const count = Array.isArray(p.value) ? p.value.length : 1;
             return (
               <li
                 key={p.key}

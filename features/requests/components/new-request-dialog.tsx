@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import {
   AlertTriangle,
   Check,
@@ -24,17 +24,20 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { stockTone } from "@/lib/format";
 import type { Asset, Priority } from "@/lib/fake-data";
-import { getInventorySnapshot } from "@/lib/storage";
 import { useInventory } from "@/lib/hooks";
 
 import {
-  nextRequestRef,
   PRIORITY_LABEL,
   PRIORITY_TONE,
   type InternalRequest,
 } from "../lib/requests";
-import { loadRequests, saveRequests } from "../lib/requests-storage";
+import {
+  createRequestAction,
+  updateRequestAction,
+  type RequestInput,
+} from "../lib/actions";
 
 type Props = {
   open: boolean;
@@ -85,14 +88,12 @@ function NewRequestBody({
   );
   const [pickedAsset, setPickedAsset] = useState<Asset | null>(() => {
     if (!editing?.assetId) return null;
-    const snap = getInventorySnapshot();
-    return snap.find((a) => a.id === editing.assetId) ?? null;
+    return inventory.find((a) => a.id === editing.assetId) ?? null;
   });
   const [search, setSearch] = useState(() => {
     if (!editing) return "";
     if (editing.assetId) {
-      const snap = getInventorySnapshot();
-      const asset = snap.find((a) => a.id === editing.assetId);
+      const asset = inventory.find((a) => a.id === editing.assetId);
       return asset?.name ?? editing.itemName;
     }
     return "";
@@ -132,12 +133,7 @@ function NewRequestBody({
       .slice(0, 30);
   }, [inventory, search]);
 
-  const stockTone = (status: Asset["status"]) =>
-    status === "healthy"
-      ? "bg-status-healthy-soft text-status-healthy ring-status-healthy/30"
-      : status === "low"
-        ? "bg-status-low-soft text-status-low ring-status-low/30"
-        : "bg-status-critical-soft text-status-critical ring-status-critical/30";
+  const [pending, startTransition] = useTransition();
 
   const submit = () => {
     if (!requesterName.trim()) {
@@ -157,64 +153,41 @@ function NewRequestBody({
       return;
     }
 
-    const existing = loadRequests();
-    const now = new Date();
+    const input: RequestInput = {
+      requesterName: requesterName.trim(),
+      requesterTeam: requesterTeam.trim(),
+      itemName: source === "catalog" ? pickedAsset!.name : adhocName.trim(),
+      assetId: source === "catalog" ? pickedAsset!.id : null,
+      brand: source === "catalog" ? pickedAsset!.brand : adhocBrand.trim(),
+      category:
+        source === "catalog"
+          ? pickedAsset!.category
+          : adhocCategory.trim() || "Otros",
+      qty,
+      priority,
+      reason: reason.trim(),
+    };
 
-    if (editing) {
-      const next = existing.map((r) =>
-        r.id === editing.id
-          ? {
-              ...r,
-              requesterName: requesterName.trim(),
-              requesterTeam: requesterTeam.trim(),
-              itemName:
-                source === "catalog" ? pickedAsset!.name : adhocName.trim(),
-              assetId: source === "catalog" ? pickedAsset!.id : undefined,
-              brand:
-                source === "catalog"
-                  ? pickedAsset!.brand
-                  : adhocBrand.trim(),
-              category:
-                source === "catalog"
-                  ? pickedAsset!.category
-                  : adhocCategory.trim(),
-              qty,
-              priority,
-              reason: reason.trim(),
-            }
-          : r,
-      );
-      saveRequests(next);
-      toast.success("Pedido actualizado", { description: editing.reference });
-    } else {
-      const reference = nextRequestRef(existing);
-      const req: InternalRequest = {
-        id: `req_${now.getTime().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-        reference,
-        requesterName: requesterName.trim(),
-        requesterTeam: requesterTeam.trim(),
-        itemName:
-          source === "catalog" ? pickedAsset!.name : adhocName.trim(),
-        assetId: source === "catalog" ? pickedAsset!.id : undefined,
-        brand:
-          source === "catalog" ? pickedAsset!.brand : adhocBrand.trim(),
-        category:
-          source === "catalog"
-            ? pickedAsset!.category
-            : adhocCategory.trim() || "Otros",
-        qty,
-        priority,
-        reason: reason.trim(),
-        status: "pending",
-        createdAt: now,
-      };
-      saveRequests([req, ...existing]);
-      toast.success("Pedido creado", {
-        description: `${reference} · ${req.qty} × ${req.itemName}`,
-      });
-    }
-
-    onClose();
+    startTransition(async () => {
+      try {
+        if (editing) {
+          await updateRequestAction(editing.id, input);
+          toast.success("Pedido actualizado", {
+            description: editing.reference,
+          });
+        } else {
+          const { reference } = await createRequestAction(input);
+          toast.success("Pedido creado", {
+            description: `${reference} · ${input.qty} × ${input.itemName}`,
+          });
+        }
+        onClose();
+      } catch (err) {
+        toast.error("No se pudo guardar", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    });
   };
 
   return (
@@ -517,10 +490,16 @@ function NewRequestBody({
       </div>
 
       <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border/70 bg-muted/30 px-5 py-3 sm:px-6">
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onClose}
+          disabled={pending}
+        >
           Cancelar
         </Button>
-        <Button type="button" size="sm" onClick={submit}>
+        <Button type="button" size="sm" onClick={submit} disabled={pending}>
           {editing ? "Guardar cambios" : "Crear pedido"}
         </Button>
       </footer>

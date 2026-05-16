@@ -42,6 +42,7 @@ export function assetFromDb(a: DbAsset): Asset {
     warrantyExpiresAt: a.warrantyExpiresAt ?? new Date(0),
     status: STATUS_FROM_DB[a.status],
     updatedAt: a.updatedAt,
+    dismissedFromAutoPlan: a.dismissedFromAutoPlan,
   };
 }
 

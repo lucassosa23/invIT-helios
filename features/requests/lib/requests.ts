@@ -1,10 +1,5 @@
 // Tipos + helpers puros de requests. Sin "use client" — los consume
 // también el lado server (Server Actions, queries, mappers).
-//
-// Las funciones de localStorage + ops legacy (applyDeliveryToInventory,
-// reconcileAwaitingRequests, syncOrderRequestLinks, etc.) viven en
-// requests-storage.ts. Se migran a Server Actions una por una; el
-// hydrator mantiene el localStorage fresco mientras tanto.
 
 import type { Asset, Priority } from "@/lib/fake-data";
 

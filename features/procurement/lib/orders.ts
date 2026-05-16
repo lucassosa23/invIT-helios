@@ -1,9 +1,5 @@
 // Tipos + helpers puros de procurement. Sin "use client" — los consume
 // también el lado server (Server Actions, queries).
-//
-// Las funciones de localStorage (loadOrders / saveOrders / subscribeOrders)
-// viven en `orders-storage.ts` (transitorias, hasta que el resto de la
-// app lea directo de la DB).
 
 /**
  * Reconoce si una orden es el plan de compras del mes (referencia tipo

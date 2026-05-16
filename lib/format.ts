@@ -60,3 +60,14 @@ export function initials(name: string): string {
   if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
+
+/** Tailwind classes para mostrar el badge de stock según status del asset. */
+export function stockTone(
+  status: "healthy" | "low" | "critical" | "out",
+): string {
+  return status === "healthy"
+    ? "bg-status-healthy-soft text-status-healthy ring-status-healthy/30"
+    : status === "low"
+      ? "bg-status-low-soft text-status-low ring-status-low/30"
+      : "bg-status-critical-soft text-status-critical ring-status-critical/30";
+}

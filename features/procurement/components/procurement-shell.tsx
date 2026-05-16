@@ -6,6 +6,8 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 import { isMonthlyPlan, type PurchaseOrder } from "../lib/orders";
+import type { PlanSuggestion } from "../lib/queries";
+import type { InternalRequest } from "@/features/requests/lib/requests";
 import { NewOrderDialog } from "./new-order-dialog";
 import { OrdersList } from "./orders-list";
 import { OrderSummaryCards } from "./order-summary-cards";
@@ -13,9 +15,17 @@ import { MonthlyPlanCard } from "./monthly-plan-card";
 
 type Props = {
   orders: PurchaseOrder[];
+  plan: PurchaseOrder | null;
+  suggestions: PlanSuggestion[];
+  requests: InternalRequest[];
 };
 
-export function ProcurementShell({ orders }: Props) {
+export function ProcurementShell({
+  orders,
+  plan,
+  suggestions,
+  requests,
+}: Props) {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
 
@@ -51,7 +61,11 @@ export function ProcurementShell({ orders }: Props) {
         </Button>
       </div>
 
-      <MonthlyPlanCard orders={orders} onEdit={openEdit} />
+      <MonthlyPlanCard
+        plan={plan}
+        suggestions={suggestions}
+        onEdit={openEdit}
+      />
 
       <OrderSummaryCards orders={planningOrders} />
 
@@ -69,6 +83,8 @@ export function ProcurementShell({ orders }: Props) {
           if (!v) setEditing(null);
         }}
         editing={editing}
+        orders={orders}
+        requests={requests}
       />
     </div>
   );

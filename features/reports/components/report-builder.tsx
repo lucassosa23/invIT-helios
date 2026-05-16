@@ -12,20 +12,11 @@ import {
   statusFromStock,
   type Asset,
 } from "@/lib/fake-data";
-import { loadInventory, subscribeInventory } from "@/lib/storage";
 import {
   isMonthlyPlan,
   type PurchaseOrder,
 } from "@/features/procurement/lib/orders";
-import {
-  loadOrders,
-  subscribeOrders,
-} from "@/features/procurement/lib/orders-storage";
 import type { InternalRequest } from "@/features/requests/lib/requests";
-import {
-  loadRequests,
-  subscribeRequests,
-} from "@/features/requests/lib/requests-storage";
 import { renderMonthlyReport } from "@/features/emails/monthly-report-template";
 import { sendEmail } from "@/features/emails/send-email";
 import {
@@ -86,12 +77,15 @@ const SECTIONS: { key: SectionKey; label: string; description: string }[] = [
   },
 ];
 
-export function ReportBuilder() {
+type Props = {
+  inventory: Asset[];
+  orders: PurchaseOrder[];
+  requests: InternalRequest[];
+};
+
+export function ReportBuilder({ inventory, orders, requests }: Props) {
   const [config, setConfig] = useState<ReportConfig>(loadConfig());
   const [exclusions, setExclusions] = useState<Set<string>>(new Set());
-  const [inventory, setInventory] = useState<Asset[]>([]);
-  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
-  const [requests, setRequests] = useState<InternalRequest[]>([]);
   const [recipientDraft, setRecipientDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [drawer, setDrawer] = useState<SectionKey | null>(null);
@@ -102,22 +96,13 @@ export function ReportBuilder() {
     const refresh = () => {
       setConfig(loadConfig());
       setExclusions(loadExclusions());
-      setInventory(loadInventory() ?? []);
-      setOrders(loadOrders());
-      setRequests(loadRequests());
     };
     refresh();
     const u1 = subscribeConfig(refresh);
     const u2 = subscribeExclusions(refresh);
-    const u3 = subscribeInventory(refresh);
-    const u4 = subscribeOrders(refresh);
-    const u5 = subscribeRequests(refresh);
     return () => {
       u1();
       u2();
-      u3();
-      u4();
-      u5();
     };
   }, []);
 

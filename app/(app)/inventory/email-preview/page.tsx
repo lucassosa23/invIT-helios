@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Mail, Send } from "lucide-react";
 import { toast } from "sonner";
@@ -10,10 +10,9 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getLocations } from "@/lib/fake-data";
-import { loadInventory, subscribeInventory } from "@/lib/storage";
+import { useInventory } from "@/lib/hooks";
 import { renderLowStockEmail } from "@/features/emails/low-stock-template";
 import { sendEmail } from "@/features/emails/send-email";
-import type { Asset } from "@/lib/fake-data";
 
 const MONTHS = [
   "enero",
@@ -32,29 +31,22 @@ const MONTHS = [
 
 export default function EmailPreviewPage() {
   const locations = useMemo(() => getLocations(), []);
-
-  const [items, setItems] = useState<Asset[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const inventory = useInventory();
   const [recipient, setRecipient] = useState("");
   const [sending, setSending] = useState(false);
 
-  useEffect(() => {
-    const compute = () => {
-      const stored = loadInventory();
-      const next = (stored ?? [])
+  const items = useMemo(
+    () =>
+      inventory
         .filter(
           (a) =>
             a.status === "critical" ||
             a.status === "out" ||
             a.status === "low",
         )
-        .sort((a, b) => a.stock - b.stock);
-      setItems(next);
-      setHydrated(true);
-    };
-    compute();
-    return subscribeInventory(compute);
-  }, []);
+        .sort((a, b) => a.stock - b.stock),
+    [inventory],
+  );
 
   const monthLabel = useMemo(() => {
     const now = new Date();
@@ -137,10 +129,10 @@ export default function EmailPreviewPage() {
           </div>
           <div className="text-[12px] text-muted-foreground">
             <div className="font-medium text-foreground">
-              {hydrated ? items.length : "—"} items en el resumen
+              {items.length} items en el resumen
             </div>
             <div className="mt-0.5">
-              {hydrated && items.length === 0
+              {items.length === 0
                 ? "Sin alertas este mes."
                 : "Crítico, agotado o bajo umbral."}
             </div>

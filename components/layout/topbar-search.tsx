@@ -29,30 +29,23 @@ import {
 import { cn } from "@/lib/utils";
 import { flatNav } from "@/lib/navigation";
 import { SETTINGS_SECTIONS } from "@/features/settings/lib/sections";
-import { loadInventory, subscribeInventory } from "@/lib/storage";
 import type { Asset } from "@/lib/fake-data";
 import type { PurchaseOrder } from "@/features/procurement/lib/orders";
-import {
-  loadOrders,
-  subscribeOrders,
-} from "@/features/procurement/lib/orders-storage";
 import type { InternalRequest } from "@/features/requests/lib/requests";
-import {
-  loadRequests,
-  subscribeRequests,
-} from "@/features/requests/lib/requests-storage";
 
-export function TopbarSearch() {
+type Props = {
+  inventory: Asset[];
+  orders: PurchaseOrder[];
+  requests: InternalRequest[];
+};
+
+export function TopbarSearch({ inventory, orders, requests }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const { setTheme, resolvedTheme } = useTheme();
-
-  const [inventory, setInventory] = useState<Asset[]>([]);
-  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
-  const [requests, setRequests] = useState<InternalRequest[]>([]);
 
   // Atajo Cmd/Ctrl+K → focusea el input
   useEffect(() => {
@@ -84,25 +77,6 @@ export function TopbarSearch() {
     };
     window.addEventListener("mousedown", onMouseDown);
     return () => window.removeEventListener("mousedown", onMouseDown);
-  }, [open]);
-
-  // Carga + subscribe cuando se abre
-  useEffect(() => {
-    if (!open) return;
-    const refresh = () => {
-      setInventory(loadInventory() ?? []);
-      setOrders(loadOrders());
-      setRequests(loadRequests());
-    };
-    refresh();
-    const u1 = subscribeInventory(refresh);
-    const u2 = subscribeOrders(refresh);
-    const u3 = subscribeRequests(refresh);
-    return () => {
-      u1();
-      u2();
-      u3();
-    };
   }, [open]);
 
   const run = (fn: () => void) => {

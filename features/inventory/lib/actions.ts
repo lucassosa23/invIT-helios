@@ -1,10 +1,10 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireUser } from "@/lib/auth/current-user";
 import { statusFromStock } from "@/lib/fake-data";
+import { makeSku, parseId, revalidateDomainPaths } from "@/lib/helpers";
 import { prisma } from "@/lib/prisma";
 
 import { statusToDb } from "./mappers";
@@ -20,6 +20,7 @@ const itemValuesSchema = z.object({
   stock: z.number().int().min(0),
   threshold: z.number().int().min(1),
   locationId: z.string().optional(),
+  dismissedFromAutoPlan: z.boolean().optional(),
 });
 
 const importRowSchema = z.object({
@@ -39,17 +40,6 @@ export type ImportRowInput = z.input<typeof importRowSchema>;
 // Helpers
 // ============================================================
 
-function makeSku(category: string, brand: string): string {
-  const c = (category.slice(0, 3) || "NEW").toUpperCase();
-  const b = (brand.slice(0, 3) || "GEN").toUpperCase();
-  const rand = Math.random().toString(36).slice(-4).toUpperCase();
-  return `${c}-${b}-${rand}`;
-}
-
-function revalidateInventoryPaths() {
-  revalidatePath("/inventory");
-  revalidatePath("/dashboard");
-}
 
 // ============================================================
 // Actions
@@ -70,10 +60,11 @@ export async function addAssetAction(values: ItemFormValuesInput) {
       threshold: v.threshold,
       locationId: v.locationId || null,
       status: statusToDb(status),
+      dismissedFromAutoPlan: v.dismissedFromAutoPlan ?? false,
     },
   });
 
-  revalidateInventoryPaths();
+  revalidateDomainPaths();
 }
 
 export async function updateAssetAction(
@@ -81,11 +72,12 @@ export async function updateAssetAction(
   values: ItemFormValuesInput,
 ) {
   await requireUser();
+  const assetId = parseId(id, "assetId");
   const v = itemValuesSchema.parse(values);
   const status = statusFromStock(v.stock, v.threshold);
 
   await prisma.asset.update({
-    where: { id },
+    where: { id: assetId },
     data: {
       name: v.name.trim(),
       brand: v.brand.trim(),
@@ -94,17 +86,19 @@ export async function updateAssetAction(
       threshold: v.threshold,
       locationId: v.locationId || null,
       status: statusToDb(status),
+      dismissedFromAutoPlan: v.dismissedFromAutoPlan,
     },
   });
 
-  revalidateInventoryPaths();
+  revalidateDomainPaths();
 }
 
 export async function adjustAssetStockAction(id: string, delta: number) {
   await requireUser();
+  const assetId = parseId(id, "assetId");
 
   const current = await prisma.asset.findUniqueOrThrow({
-    where: { id },
+    where: { id: assetId },
     select: { stock: true, threshold: true },
   });
 
@@ -112,20 +106,31 @@ export async function adjustAssetStockAction(id: string, delta: number) {
   if (nextStock === current.stock) return;
 
   await prisma.asset.update({
-    where: { id },
+    where: { id: assetId },
     data: {
       stock: nextStock,
       status: statusToDb(statusFromStock(nextStock, current.threshold)),
     },
   });
 
-  revalidateInventoryPaths();
+  revalidateDomainPaths();
 }
 
 export async function deleteAssetAction(id: string) {
   await requireUser();
-  await prisma.asset.delete({ where: { id } });
-  revalidateInventoryPaths();
+  const assetId = parseId(id, "assetId");
+  await prisma.asset.delete({ where: { id: assetId } });
+  revalidateDomainPaths();
+}
+
+export async function setAssetDismissedAction(id: string, dismissed: boolean) {
+  await requireUser();
+  const assetId = parseId(id, "assetId");
+  await prisma.asset.update({
+    where: { id: assetId },
+    data: { dismissedFromAutoPlan: dismissed },
+  });
+  revalidateDomainPaths();
 }
 
 /** Inserta un asset con valores arbitrarios (usado para el "Deshacer"
@@ -155,7 +160,7 @@ export async function restoreAssetAction(asset: {
       status: statusToDb(status),
     },
   });
-  revalidateInventoryPaths();
+  revalidateDomainPaths();
 }
 
 export async function replaceInventoryAction(rows: ImportRowInput[]) {
@@ -178,7 +183,7 @@ export async function replaceInventoryAction(rows: ImportRowInput[]) {
     }),
   ]);
 
-  revalidateInventoryPaths();
+  revalidateDomainPaths();
 }
 
 export async function appendInventoryAction(rows: ImportRowInput[]) {
@@ -198,11 +203,11 @@ export async function appendInventoryAction(rows: ImportRowInput[]) {
     })),
   });
 
-  revalidateInventoryPaths();
+  revalidateDomainPaths();
 }
 
 export async function clearInventoryAction() {
   await requireUser();
   await prisma.asset.deleteMany({});
-  revalidateInventoryPaths();
+  revalidateDomainPaths();
 }
